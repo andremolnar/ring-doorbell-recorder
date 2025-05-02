@@ -26,6 +26,7 @@ ringdoorbell.db
 ring_token.cache
 migrations/versions/__pycache__/
 *.log
+*.cache 
 
 # Environments
 .env
