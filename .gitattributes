@@ -1,0 +1,28 @@
+# Handle line endings automatically for files detected as text
+* text=auto
+
+# Exclude these files from diff (binary files)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mov binary
+*.mp4 binary
+*.mp3 binary
+*.flv binary
+*.fla binary
+*.swf binary
+*.gz binary
+*.zip binary
+*.7z binary
+*.ttf binary
+*.eot binary
+*.woff binary
+*.pyc binary
+*.pdf binary
+*.cache binary
+
+# Exclude these files from the GitHub language statistics
+*.html linguist-vendored
+*.css linguist-vendored
