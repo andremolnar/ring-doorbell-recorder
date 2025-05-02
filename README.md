@@ -1,24 +1,24 @@
-# Ring Doorbell Capture Application
+# Ring Doorbell Recorder
 
-A modern, modular application for capturing and storing events from Ring Doorbell devices. This application uses a clean architecture approach with well-defined components and clear separation of concerns.
+A modern, event-driven application for capturing and storing events from Ring Doorbell devices. This application automatically records and organizes your Ring Doorbell events with a robust architecture that ensures reliable data capture.
 
 ## Project Overview
 
-This application captures events (doorbell rings, motion detection, etc.) from Ring Doorbell and camera devices, processes them into structured data, and stores them in multiple storage backends simultaneously. It uses a robust, event-driven architecture with strong typing and modern async Python.
+This application captures events (doorbell rings, motion detection, etc.) from Ring Doorbell and camera devices, processes them into structured data, and stores them securely. It uses a clean architecture approach with well-defined components and clear separation of concerns.
 
 Key features:
 
-- Token-based and credential-based authentication with 2FA support
+- Token-based authentication with 2FA support
 - Event-driven architecture using the Observer pattern
-- Multiple storage backends (Database, File, Network)
+- Multiple storage backends (Database & File)
 - Structured event data validation using Pydantic
-- Comprehensive logging with structlog
+- Comprehensive logging
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.11+ (required)
 - Conda (for environment management)
 - Ring account credentials
 
@@ -27,8 +27,8 @@ Key features:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/ringdoorbell.git
-   cd ringdoorbell
+   git clone https://github.com/andremolnar/ring-doorbell-recorder.git
+   cd ring-doorbell-recorder
    ```
 
 2. Create and activate the conda environment:
@@ -37,57 +37,6 @@ Key features:
    conda env create -f environment.yml
    conda activate ringdoorbell
    ```
-
-3. Install the package in development mode:
-
-   ```bash
-   pip install -e .
-   ```
-
-## Running the Application
-
-There are several ways to run the application:
-
-### As a Package
-
-```bash
-# Activate the conda environment first
-conda activate ringdoorbell
-
-# Run using Python module syntax
-python -m src
-```
-
-### Using the Entry Point
-
-After installation, you can use the console script:
-
-```bash
-# Activate the conda environment first
-conda activate ringdoorbell
-
-# Run the application
-ringdoorbell
-```
-
-### Direct Execution
-
-```bash
-# Activate the conda environment first
-conda activate ringdoorbell
-
-# Run using the convenience script
-python run.py
-```
-
-````
-
-2. Create and activate the Conda environment:
-
-```bash
-conda env create -f environment.yml
-conda activate ringdoorbell
-````
 
 3. Install dependencies:
 
@@ -100,7 +49,6 @@ conda activate ringdoorbell
    # Create a .env file with your Ring credentials
    echo "RING_EMAIL=your_email@example.com" > .env
    echo "RING_PASSWORD=your_password" >> .env
-   echo "NAS_STORAGE_PATH=/path/to/storage" >> .env
    ```
 
 ## Usage
@@ -125,21 +73,30 @@ conda activate ringdoorbell
    - Start listening for events
    - Capture and store events to configured storage backends
 
+## Future Development
+
+This project is actively seeking ways to make it more extensible for other users. Future enhancements will include:
+
+- Plug-and-play architecture for custom event capture mechanisms
+- User-defined storage locations and strategies
+- Event transformation pipelines
+- Integration with home automation systems
+- Support for additional doorbell/camera vendors
+
+If you're interested in contributing to these efforts, please open an issue or submit a pull request.
+
 ### Configuration
 
 The application can be configured using environment variables:
 
-| Variable              | Description                        | Default               |
-| --------------------- | ---------------------------------- | --------------------- |
-| `RING_EMAIL`          | Ring account email                 | -                     |
-| `RING_PASSWORD`       | Ring account password              | -                     |
-| `RING_TOKEN_PATH`     | Path to token cache file           | `~/.ring_token.cache` |
-| `DATABASE_PATH`       | Path to SQLite database            | `./ringdoorbell.db`   |
-| `NAS_STORAGE_PATH`    | Path for file storage              | `./captured_media`    |
-| `NETWORK_STORAGE_URL` | URL for network storage (S3, SFTP) | -                     |
-| `LOGGING_LEVEL`       | Logging level                      | `INFO`                |
-| `CAPTURE_INTERVAL`    | Time between captures (seconds)    | `60`                  |
-| `MAX_STORAGE_SIZE`    | Maximum storage size (bytes)       | `1GB`                 |
+| Variable          | Description              | Default               |
+| ----------------- | ------------------------ | --------------------- |
+| `RING_EMAIL`      | Ring account email       | -                     |
+| `RING_PASSWORD`   | Ring account password    | -                     |
+| `RING_TOKEN_PATH` | Path to token cache file | `~/.ring_token.cache` |
+| `DATABASE_PATH`   | Path to SQLite database  | `./ringdoorbell.db`   |
+| `STORAGE_PATH`    | Path for file storage    | `./captured_media`    |
+| `LOGGING_LEVEL`   | Logging level            | `INFO`                |
 
 ## Architecture
 
