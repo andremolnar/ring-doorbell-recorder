@@ -45,10 +45,21 @@ Key features:
    ```
 
 4. Set up environment variables:
+
    ```bash
    # Create a .env file with your Ring credentials
    echo "RING_EMAIL=your_email@example.com" > .env
    echo "RING_PASSWORD=your_password" >> .env
+   ```
+
+5. Initialize the database and run migrations:
+
+   ```bash
+   # Install alembic if not already installed
+   pip install alembic
+
+   # Generate the database and run all migrations
+   alembic upgrade head
    ```
 
 ## Usage
@@ -72,6 +83,39 @@ Key features:
    - Discover your devices
    - Start listening for events
    - Capture and store events to configured storage backends
+
+### Database Management
+
+The application uses SQLAlchemy with Alembic for database management:
+
+1. Check migration status:
+
+   ```bash
+   alembic current
+   ```
+
+2. Create a new migration after model changes:
+
+   ```bash
+   alembic revision --autogenerate -m "Description of changes"
+   ```
+
+3. Apply migrations:
+
+   ```bash
+   alembic upgrade head
+   ```
+
+4. Rollback to a previous migration:
+
+   ```bash
+   alembic downgrade -1  # Go back one revision
+   ```
+
+5. View migration history:
+   ```bash
+   alembic history
+   ```
 
 ## Future Development
 
