@@ -1,0 +1,13 @@
+Flask
+requests
+sqlalchemy
+sqlite3
+pytest
+pydantic
+fastapi
+uvicorn
+python-dotenv
+structlog
+pyee
+aiosqlite
+ring-doorbell
