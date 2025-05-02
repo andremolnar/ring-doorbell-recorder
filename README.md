@@ -123,9 +123,6 @@ This project is actively seeking ways to make it more extensible for other users
 
 - Plug-and-play architecture for custom event capture mechanisms
 - User-defined storage locations and strategies
-- Event transformation pipelines
-- Integration with home automation systems
-- Support for additional doorbell/camera vendors
 
 If you're interested in contributing to these efforts, please open an issue or submit a pull request.
 
