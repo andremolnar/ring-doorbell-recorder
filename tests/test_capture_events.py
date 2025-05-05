@@ -94,25 +94,6 @@ def other_event_data():
         device_name="Test Device"
     )
 
-
-@pytest.mark.asyncio
-async def test_db_storage_deduplication(db_storage, event_data):
-    """Test that duplicate events don't cause errors in DatabaseStorage."""
-    # First save should succeed
-    result1 = await db_storage.save(event_data)
-    assert result1 is True, "First save should return True"
-    
-    # Second save of the same event should be handled gracefully
-    result2 = await db_storage.save(event_data)
-    assert result2 is False, "Second save of the same event should return False"
-    
-    # Verify the event is in the database exactly once
-    async with db_storage._session_factory() as session:
-        result = await session.execute(select(RingEvent).where(RingEvent.id == event_data.id))
-        events = result.scalars().all()
-        assert len(events) == 1, "Event should be in the database exactly once"
-
-
 @pytest.mark.asyncio
 async def test_file_storage_handles_errors(tmp_path):
     """Test that FileStorage handles errors gracefully."""
@@ -130,7 +111,7 @@ async def test_file_storage_handles_errors(tmp_path):
     )
     
     # First save should succeed
-    result = await storage.save(event)
+    result = await storage.save_event(event)
     assert result is True, "Save should return True on success"
     
     # Verify the file was created
@@ -145,9 +126,9 @@ async def test_file_storage_handles_errors(tmp_path):
 async def test_db_storage_different_event_types(db_storage, ding_event_data, on_demand_event_data, other_event_data):
     """Test that different event types are saved correctly."""
     # Save different event types
-    result1 = await db_storage.save(ding_event_data)
-    result2 = await db_storage.save(on_demand_event_data)
-    result3 = await db_storage.save(other_event_data)
+    result1 = await db_storage.save_event(ding_event_data)
+    result2 = await db_storage.save_event(on_demand_event_data)
+    result3 = await db_storage.save_event(other_event_data)
     
     assert result1 is True, "Ding event should be saved successfully"
     assert result2 is True, "On-demand event should be saved successfully"

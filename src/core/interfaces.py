@@ -1,7 +1,8 @@
 """Core interfaces for the Ring Doorbell application."""
 
 import abc
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable, Union
 
 from pydantic import BaseModel
 
@@ -38,7 +39,7 @@ class OnDemandEventData(EventData):
 class IStorage(Protocol):
     """Interface for storage implementations."""
     
-    async def save(self, event: EventData) -> bool:
+    async def save_event(self, event: EventData) -> bool:
         """
         Save event data to storage.
         
@@ -50,7 +51,7 @@ class IStorage(Protocol):
         """
         ...
     
-    async def retrieve(self, event_id: str) -> Optional[EventData]:
+    async def retrieve_event(self, event_id: str) -> Optional[EventData]:
         """
         Retrieve event data from storage.
         
@@ -59,6 +60,33 @@ class IStorage(Protocol):
             
         Returns:
             Event data if found, None otherwise
+        """
+        ...
+    
+    async def save_video(self, event_id: str, video_data: Union[bytes, str, Path], 
+                         metadata: Optional[Dict] = None) -> str:
+        """
+        Save video data associated with an event.
+        
+        Args:
+            event_id: ID of the associated event
+            video_data: Video content as bytes, or path to video file as string or Path
+            metadata: Optional metadata about the video (format, duration, etc.)
+            
+        Returns:
+            Video identifier or URL to access the stored video
+        """
+        ...
+    
+    async def retrieve_video(self, event_id: str) -> Optional[Union[bytes, str]]:
+        """
+        Retrieve video data for an event.
+        
+        Args:
+            event_id: ID of the event associated with the video
+            
+        Returns:
+            Video data as bytes or a path/URL to the video, None if not found
         """
         ...
 
