@@ -187,8 +187,8 @@ async def main():
         # Get the authenticated Ring API
         ring_api = auth_manager.api
         
-        # Create the capture engine
-        capture_engine = CaptureEngine(storages)
+        # Create the capture engine with the authenticated Ring API and auth manager
+        capture_engine = CaptureEngine(storages, ring_api, auth_manager)
         
         # Create the event listener
         event_listener = RingEventListener(ring_api, auth_manager)

@@ -86,6 +86,28 @@ Key features:
    - Start listening for events
    - Capture and store events to configured storage backends
 
+### Manual Testing
+
+The repository includes standalone test scripts to simulate Ring events and verify the recording functionality:
+
+- `test_motion_event.py`: Simulates a motion detection event and tests the full capture flow
+- `test_ding_event.py`: Simulates a doorbell ring event and tests the full capture flow
+
+To run these test scripts:
+
+```bash
+# Activate the Conda environment first
+conda activate ringdoorbell
+
+# Simulate a motion event
+python test_motion_event.py
+
+# Simulate a doorbell ring event
+python test_ding_event.py
+```
+
+These scripts are useful for verifying that the capture engine correctly processes different event types and stores the associated video recordings.
+
 ### Testing Live View
 
 The repository includes a standalone script `live_view_example.py` to test on-demand video recording from your Ring doorbell or camera. This allows you to verify WebRTC connectivity and test the LiveView functionality separately from the main application.
@@ -297,9 +319,21 @@ Please follow our coding standards:
 - PEP 484 for type hints
 - PEP 257 for docstrings
 
-## Prior work
+## Prior Art
 
-https://pkg.go.dev/github.com/AlexxIT/go2rtc/pkg/ring
+This project builds upon and was inspired by several excellent open-source libraries:
+
+### [python-ring-doorbell](https://github.com/python-ring-doorbell/python-ring-doorbell)
+
+This library provides core Ring API functionality and authentication support. Our project leverages it primarily for authentication and basic device interaction, while implementing our own event handling and video capture mechanisms.
+
+### [ring-client-api](https://github.com/dgreif/ring/tree/main/packages/ring-client-api/streaming)
+
+This JavaScript/TypeScript library by Dusty Greif provided significant insights into the WebRTC streaming implementation. Our LiveViewClient's WebRTC negotiation process was heavily inspired by the approach used in this library, adapted for Python with aiortc.
+
+### [go2rtc](https://pkg.go.dev/github.com/AlexxIT/go2rtc/pkg/ring)
+
+This Go library by AlexxIT provided valuable reference for understanding the Ring API's WebRTC implementation
 
 ## License
 

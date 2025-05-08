@@ -14,6 +14,8 @@ class EventData(BaseModel):
     created_at: str
     device_id: str
     device_name: str
+    has_video: bool = False
+    video_path: Optional[str] = None
     
     class Config:
         """Pydantic configuration."""
@@ -155,5 +157,15 @@ class IAuthManager(abc.ABC):
         
         Returns:
             Account ID for the authenticated user
+        """
+        pass
+        
+    @abc.abstractmethod
+    def get_token(self) -> Optional[str]:
+        """
+        Get the current auth token for API requests.
+        
+        Returns:
+            Current auth token or None if not available
         """
         pass

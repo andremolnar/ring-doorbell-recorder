@@ -218,21 +218,17 @@ class FileStorage(IStorage):
         Returns:
             True if saved successfully, False if already exists or failed
         """
-        # Convert Pydantic model to dict
+        # Convert the entire Pydantic model to dict, keeping all fields
         event_dict = event.dict()
-        
-        # Extract standard fields and put the rest in event_data JSON
-        standard_fields = {"id", "kind", "created_at", "device_id", "device_name"}
-        event_data = {k: v for k, v in event_dict.items() if k not in standard_fields}
         
         # Create a directory for the event if it doesn't exist
         event_dir = os.path.join(self._storage_path, event.device_id, event.kind, event.id)
         os.makedirs(event_dir, exist_ok=True)
         
-        # Save event metadata as JSON
-        metadata_path = os.path.join(event_dir, "metadata.json")
-        with open(metadata_path, 'w') as f:
-            json.dump(event_data, f, default=str, indent=2)
+        # Save complete event data as JSON
+        event_path = os.path.join(event_dir, "event.json")
+        with open(event_path, 'w') as f:
+            json.dump(event_dict, f, default=str, indent=2)
            
         return True
             
@@ -246,15 +242,25 @@ class FileStorage(IStorage):
         Returns:
             Event data if found, None otherwise
         """
-        # For file storage, we will just read the metadata JSON directly
-        metadata_path = os.path.join(self._storage_path, "**", event_id, "metadata.json")
+        # Search for event.json files that match this event_id
+        event_path = os.path.join(self._storage_path, "**", "**", event_id, "event.json")
         
         # Use fsspec to handle the glob pattern and read the file
-        files = fsspec.open_files(metadata_path, recursive=True)
+        files = fsspec.open_files(event_path, recursive=True)
         for file in files:
             with file.open() as f:
                 event_data = json.load(f)
-                return EventData.parse_obj(event_data)
+                
+                # Determine the correct event type model based on the kind field
+                event_kind = event_data.get("kind", "")
+                if event_kind == "ding":
+                    return DingEventData.parse_obj(event_data)
+                elif event_kind == "motion":
+                    return MotionEventData.parse_obj(event_data)
+                elif event_kind == "on_demand":
+                    return OnDemandEventData.parse_obj(event_data)
+                else:
+                    return EventData.parse_obj(event_data)
         
         return None
 
@@ -281,46 +287,73 @@ class FileStorage(IStorage):
             # Determine video extension (default to mp4 if not provided in metadata)
             video_ext = metadata.get("extension", "mp4") if metadata else "mp4"
             
-            # Create a directory structure based on date and event type
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            # Try to get the event to determine its path
+            device_id = metadata.get("device_id") if metadata else None
+            event_type = metadata.get("event_type") if metadata else None
             
-            # Try to get the event type, default to "videos" if not found
-            event_type = "videos"
-            if metadata and "event_type" in metadata:
-                event_type = metadata["event_type"]
+            if not (device_id and event_type):
+                # Try to find the event to get its device_id and kind
+                event_path_pattern = os.path.join(self._storage_path, "**", "**", event_id, "event.json")
+                files = fsspec.open_files(event_path_pattern, recursive=True)
+                
+                for file in files:
+                    with file.open() as f:
+                        try:
+                            event_data = json.load(f)
+                            device_id = event_data.get("device_id")
+                            event_type = event_data.get("kind")
+                            break
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Create a directory structure based on device_id/event_type/event_id
+            if device_id and event_type:
+                video_dir = os.path.join(self._storage_path, device_id, event_type, event_id)
             else:
-                # Try to find the event to get its type
-                event = await self.retrieve_event(event_id)
-                if event:
-                    event_type = event.kind
+                # Fallback if we couldn't determine the path
+                video_dir = os.path.join(self._storage_path, "unknown", "videos", event_id)
             
-            video_dir = os.path.join(self._storage_path, date_str, event_type, "videos")
             os.makedirs(video_dir, exist_ok=True)
             
-            # Create a filename based on event ID and timestamp
-            timestamp = datetime.now().strftime("%H%M%S")
-            filename = f"{event_id}_{timestamp}.{video_ext}"
+            # Create a filename for the video
+            filename = f"video.{video_ext}"
             file_path = os.path.join(video_dir, filename)
             
             # Write the video data to the file
-            if isinstance(video_data, (str, Path)) and os.path.isfile(video_data):
+            if isinstance(video_data, (str, Path)) and os.path.isfile(str(video_data)):
                 # If video_data is a path to an existing file, copy it
-                import shutil
-                shutil.copy2(video_data, file_path)
+                with open(str(video_data), 'rb') as src, open(file_path, 'wb') as dst:
+                    dst.write(src.read())
             else:
                 # Otherwise, write the bytes directly
                 with open(file_path, 'wb') as f:
                     if isinstance(video_data, bytes):
                         f.write(video_data)
                     else:
-                        # If it's a string but not a file path, treat it as base64 or other text format
+                        # If it's a string but not a file path, treat it as text
                         f.write(str(video_data).encode('utf-8'))
             
             # If metadata is provided, save it alongside the video
             if metadata:
-                metadata_path = f"{file_path}.meta.json"
+                metadata_path = os.path.join(video_dir, "video_metadata.json")
                 with open(metadata_path, 'w') as f:
                     json.dump(metadata, f, indent=2)
+            
+            # If we have a corresponding event JSON, update it to include video information
+            event_json_path = os.path.join(video_dir, "event.json")
+            if os.path.exists(event_json_path):
+                with open(event_json_path, 'r') as f:
+                    event_data = json.load(f)
+                
+                # Update the event data to include video information
+                event_data["has_video"] = True
+                event_data["video_path"] = file_path
+                if metadata and "recording_id" in metadata:
+                    event_data["recording_id"] = metadata["recording_id"]
+                
+                # Write the updated event data back to the file
+                with open(event_json_path, 'w') as f:
+                    json.dump(event_data, f, default=str, indent=2)
             
             return file_path
             
@@ -338,17 +371,37 @@ class FileStorage(IStorage):
         Returns:
             Path to the video file if found, None otherwise
         """
-        # Search for video files with the event ID in the filename
-        for root, _, files in os.walk(self._storage_path):
+        try:
+            # First, try to find the event to get its path
+            event_path_pattern = os.path.join(self._storage_path, "**", "**", event_id, "event.json")
+            files = fsspec.open_files(event_path_pattern, recursive=True)
+            
             for file in files:
-                # Check if this is a video file (not metadata) with the event ID
-                if file.startswith(f"{event_id}_") and not file.endswith(".meta.json"):
-                    # Only return files with video extensions
-                    video_exts = ['.mp4', '.avi', '.mov', '.mkv', '.webm']
-                    if any(file.lower().endswith(ext) for ext in video_exts):
-                        return os.path.join(root, file)
-        
-        return None
+                try:
+                    with file.open() as f:
+                        event_data = json.load(f)
+                        
+                        # Check if the event has video information
+                        if event_data.get("has_video") and event_data.get("video_path"):
+                            return event_data["video_path"]
+                except Exception:
+                    continue
+            
+            # If no video path in event data, try to find a video file directly
+            event_dir_pattern = os.path.join(self._storage_path, "**", "**", event_id)
+            dirs = [d for d in fsspec.filesystem("file").glob(event_dir_pattern)]
+            
+            for event_dir in dirs:
+                # Check for video files in the event directory
+                for ext in ["mp4", "mkv", "mov", "avi"]:
+                    video_path = os.path.join(event_dir, f"video.{ext}")
+                    if os.path.exists(video_path):
+                        return video_path
+            
+            return None
+        except Exception as e:
+            print(f"Error retrieving video: {e}")
+            return None
 
 class NetworkStorage(IStorage):
     """Network-based storage implementation."""
@@ -374,21 +427,17 @@ class NetworkStorage(IStorage):
         Returns:
             True if saved successfully, False if already exists or failed
         """
-        # Convert Pydantic model to dict
+        # Convert the entire Pydantic model to dict, keeping all fields
         event_dict = event.dict()
-        
-        # Extract standard fields and put the rest in event_data JSON
-        standard_fields = {"id", "kind", "created_at", "device_id", "device_name"}
-        event_data = {k: v for k, v in event_dict.items() if k not in standard_fields}
         
         # Create a directory for the event if it doesn't exist
         event_dir = f"{self._storage_url}/{event.device_id}/{event.kind}/{event.id}"
         self._fs.makedirs(event_dir, exist_ok=True)
         
-        # Save event metadata as JSON
-        metadata_path = f"{event_dir}/metadata.json"
-        with self._fs.open(metadata_path, 'w') as f:
-            f.write(json.dumps(event_data, default=str, indent=2))
+        # Save complete event data as JSON
+        event_path = f"{event_dir}/event.json"
+        with self._fs.open(event_path, 'w') as f:
+            f.write(json.dumps(event_dict, default=str, indent=2))
                 
         return True
             
@@ -402,15 +451,25 @@ class NetworkStorage(IStorage):
         Returns:
             Event data if found, None otherwise
         """
-        # For network storage, we will just read the metadata JSON directly
-        metadata_path = f"{self._storage_url}/**/{event_id}/metadata.json"
+        # Search for event.json files that match this event_id
+        event_path = f"{self._storage_url}/**/**/{event_id}/event.json"
         
         # Use fsspec to handle the glob pattern and read the file
-        files = self._fs.glob(metadata_path)
+        files = self._fs.glob(event_path)
         for file_path in files:
             with self._fs.open(file_path) as f:
                 event_data = json.load(f)
-                return EventData.parse_obj(event_data)
+                
+                # Determine the correct event type model based on the kind field
+                event_kind = event_data.get("kind", "")
+                if event_kind == "ding":
+                    return DingEventData.parse_obj(event_data)
+                elif event_kind == "motion":
+                    return MotionEventData.parse_obj(event_data)
+                elif event_kind == "on_demand":
+                    return OnDemandEventData.parse_obj(event_data)
+                else:
+                    return EventData.parse_obj(event_data)
         
         return None
 
@@ -444,25 +503,36 @@ class NetworkStorage(IStorage):
             # Determine video extension (default to mp4 if not provided in metadata)
             video_ext = metadata.get("extension", "mp4") if metadata else "mp4"
             
-            # Create a directory structure based on date and event type
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            # Try to get the event to determine its path
+            device_id = metadata.get("device_id") if metadata else None
+            event_type = metadata.get("event_type") if metadata else None
             
-            # Try to get the event type, default to "videos" if not found
-            event_type = "videos"
-            if metadata and "event_type" in metadata:
-                event_type = metadata["event_type"]
+            if not (device_id and event_type):
+                # Try to find the event to get its device_id and kind
+                event_path = f"{self._storage_url}/**/**/{event_id}/event.json"
+                files = self._fs.glob(event_path)
+                
+                for file_path in files:
+                    with self._fs.open(file_path) as f:
+                        try:
+                            event_data = json.load(f)
+                            device_id = event_data.get("device_id")
+                            event_type = event_data.get("kind")
+                            break
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Create a directory structure based on device_id/event_type/event_id
+            if device_id and event_type:
+                video_dir = f"{self._storage_url}/{device_id}/{event_type}/{event_id}"
             else:
-                # Try to find the event to get its type
-                event = await self.retrieve_event(event_id)
-                if event:
-                    event_type = event.kind
+                # Fallback if we couldn't determine the path
+                video_dir = f"{self._storage_url}/unknown/videos/{event_id}"
             
-            video_dir = f"{self._storage_url}/{date_str}/{event_type}/videos"
             self._fs.makedirs(video_dir, exist_ok=True)
             
-            # Create a filename based on event ID and timestamp
-            timestamp = datetime.now().strftime("%H%M%S")
-            filename = f"{event_id}_{timestamp}.{video_ext}"
+            # Create a filename for the video
+            filename = f"video.{video_ext}"
             file_path = f"{video_dir}/{filename}"
             
             # Write the video data to the file
@@ -476,14 +546,30 @@ class NetworkStorage(IStorage):
                     if isinstance(video_data, bytes):
                         f.write(video_data)
                     else:
-                        # If it's a string but not a file path, treat it as base64 or other text format
+                        # If it's a string but not a file path, treat it as text
                         f.write(str(video_data).encode('utf-8'))
             
             # If metadata is provided, save it alongside the video
             if metadata:
-                metadata_path = f"{file_path}.meta.json"
+                metadata_path = f"{video_dir}/video_metadata.json"
                 with self._fs.open(metadata_path, 'w') as f:
                     f.write(json.dumps(metadata, indent=2))
+            
+            # If we have a corresponding event JSON, update it to include video information
+            event_json_path = f"{video_dir}/event.json"
+            if self._fs.exists(event_json_path):
+                with self._fs.open(event_json_path, 'r') as f:
+                    event_data = json.load(f)
+                
+                # Update the event data to include video information
+                event_data["has_video"] = True
+                event_data["video_path"] = file_path
+                if metadata and "recording_id" in metadata:
+                    event_data["recording_id"] = metadata["recording_id"]
+                
+                # Write the updated event data back to the file
+                with self._fs.open(event_json_path, 'w') as f:
+                    f.write(json.dumps(event_data, default=str, indent=2))
             
             return file_path
             
@@ -501,19 +587,34 @@ class NetworkStorage(IStorage):
         Returns:
             URL to the video file if found, None otherwise
         """
-        # Search for video files with the event ID in the filename
-        pattern = f"{self._storage_url}/**/{event_id}_*"
-        
         try:
-            for file_path in self._fs.glob(pattern):
-                # Exclude metadata files
-                if not file_path.endswith(".meta.json"):
-                    # Check if this appears to be a video file
-                    video_exts = ['.mp4', '.avi', '.mov', '.mkv', '.webm']
-                    if any(file_path.lower().endswith(ext) for ext in video_exts):
-                        return file_path
+            # First, try to find the event to get its path
+            event_path = f"{self._storage_url}/**/**/{event_id}/event.json"
+            files = self._fs.glob(event_path)
+            
+            for file_path in files:
+                try:
+                    with self._fs.open(file_path) as f:
+                        event_data = json.load(f)
                         
+                        # Check if the event has video information
+                        if event_data.get("has_video") and event_data.get("video_path"):
+                            return event_data["video_path"]
+                except Exception:
+                    continue
+            
+            # If no video path in event data, try to find a video file directly
+            event_dir_pattern = f"{self._storage_url}/**/**/{event_id}"
+            dirs = self._fs.glob(event_dir_pattern)
+            
+            for event_dir in dirs:
+                # Check for video files in the event directory
+                for ext in ["mp4", "mkv", "mov", "avi"]:
+                    video_path = f"{event_dir}/video.{ext}"
+                    if self._fs.exists(video_path):
+                        return video_path
+            
+            return None
         except Exception as e:
-            print(f"Error searching for video {event_id} in network storage: {e}")
-        
-        return None
+            print(f"Error retrieving video: {e}")
+            return None

@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed issue with duplicate event processing causing database errors
 - Improved error handling in storage implementations
+- Fixed ding event video recording by properly passing event_id to start_live_view method
 - Fixed WebRTC connection issues by completely revising the Ring LiveViewClient:
   - Reversed the SDP offer/answer flow to follow Ring's expected pattern
   - Updated keepalive format from "action" to "method" with "ping" messages

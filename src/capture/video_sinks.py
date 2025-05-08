@@ -20,14 +20,16 @@ class RecorderSink(VideoSink):
     This is the simplest sink that just delegates to MediaRecorder.
     """
     
-    def __init__(self, path: Union[str, Path]):
+    def __init__(self, path: Union[str, Path], callback=None):
         """
         Initialize the RecorderSink.
         
         Args:
             path: Path to the MP4 file to create
+            callback: Optional callback function to call when recording completes
         """
         self._path = str(path)
+        self._callback = callback
         # Ensure the directory exists
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         # Create the MediaRecorder
@@ -87,11 +89,34 @@ class RecorderSink(VideoSink):
                 self._rec = None
                 
                 # Verify file exists and has content
-                if os.path.exists(self._path):
-                    size = os.path.getsize(self._path)
-                    logger.info(f"MediaRecorder completed. Output file size: {size} bytes")
-                    if size < 1000:  # Check for a minimum file size
-                        logger.warning(f"Warning: Output file is too small: {self._path} ({size} bytes)")
+                file_exists = os.path.exists(self._path)
+                file_size = os.path.getsize(self._path) if file_exists else 0
+                
+                if file_exists:
+                    logger.info(f"MediaRecorder completed. Output file size: {file_size} bytes")
+                    if file_size < 1000:  # Check for a minimum file size
+                        logger.warning(f"Warning: Output file is too small: {self._path} ({file_size} bytes)")
+                    elif self._callback:
+                        # Call the callback with the file path and size
+                        try:
+                            logger.info(f"Calling recording completion callback for {self._path}")
+                            self._callback(self._path, file_size)
+                            logger.info(f"Recording completion callback called successfully")
+                        except Exception as e:
+                            logger.error(f"Error in recorder callback: {e}", exc_info=True)
+                            # Try to track down where the error is happening
+                            import traceback
+                            logger.error(f"Callback error traceback: {traceback.format_exc()}")
+                            
+                            # Attempt to diagnose the callback
+                            try:
+                                if callable(self._callback):
+                                    logger.info(f"Callback is callable: {self._callback.__name__}")
+                                    logger.info(f"Callback object: {self._callback}")
+                                else:
+                                    logger.error(f"Callback is not callable: {self._callback}")
+                            except Exception as inner_e:
+                                logger.error(f"Error inspecting callback: {inner_e}")
                 else:
                     logger.warning(f"Warning: Output file does not exist: {self._path}")
                 
