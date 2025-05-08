@@ -1,18 +1,20 @@
 # Ring Doorbell Recorder
 
-A modern, event-driven application for capturing and storing events from Ring Doorbell devices. This application automatically records and organizes your Ring Doorbell events with a robust architecture that ensures reliable data capture.
+A modern, event-driven application for capturing and storing events from Ring Doorbell devices. This application automatically records and organizes your Ring Doorbell events with a robust architecture that ensures reliable data capture and video storage.
 
 ## Project Overview
 
-This application captures events (doorbell rings, motion detection, etc.) from Ring Doorbell and camera devices, processes them into structured data, and stores them securely. It uses a clean architecture approach with well-defined components and clear separation of concerns.
+This application captures events (doorbell rings, motion detection, etc.) from Ring Doorbell and camera devices, processes them into structured data, and stores them securely. It automatically downloads and stores video recordings associated with events. The application uses a clean architecture approach with well-defined components and clear separation of concerns.
 
 Key features:
 
 - Token-based authentication with 2FA support
 - Event-driven architecture using the Observer pattern
 - Multiple storage backends (Database & File)
+- Automatic video download and storage for recorded events
 - Structured event data validation using Pydantic
 - Comprehensive logging
+- Utility script for downloading historical videos
 
 ## Installation
 
@@ -84,6 +86,35 @@ Key features:
    - Start listening for events
    - Capture and store events to configured storage backends
 
+### Testing Live View
+
+The repository includes a standalone script `live_view_example.py` to test on-demand video recording from your Ring doorbell or camera. This allows you to verify WebRTC connectivity and test the LiveView functionality separately from the main application.
+
+```bash
+# Activate the Conda environment first
+conda activate ringdoorbell
+
+# List all available Ring devices
+python live_view_example.py --device-id list
+
+# Capture a 30-second video from a specific device (default duration)
+python live_view_example.py --device-id YOUR_DEVICE_ID
+
+# Capture with custom duration (in seconds)
+python live_view_example.py --device-id YOUR_DEVICE_ID --duration 60
+
+# Save to a custom output directory
+python live_view_example.py --device-id YOUR_DEVICE_ID --output-dir ./my_videos
+```
+
+Arguments:
+
+- `--device-id` or `-d`: Ring device ID to stream from (required)
+- `--duration` or `-t`: Duration of the stream in seconds (default: 30)
+- `--output-dir` or `-o`: Directory to save the captured video (default: captured_media)
+
+The captured video will be saved as an MP4 file with a timestamp filename in the specified output directory.
+
 ### Database Management
 
 The application uses SQLAlchemy with Alembic for database management:
@@ -152,6 +183,7 @@ The application follows a clean, modular architecture with well-defined componen
 | **Low-Level API**     | Wrapper over Ring API protocol                        |
 | **Event Listener**    | Subscribes to API events, dispatches to CaptureEngine |
 | **Capture Engine**    | Processes events, fans out to storage implementations |
+| **LiveView Client**   | Establishes WebRTC connections to Ring devices        |
 | **Storage Interface** | Abstract interface for storage implementations        |
 
 ### Event Handling
@@ -214,6 +246,13 @@ Events are structured using Pydantic models:
 - `MotionEventData`: Model for motion detection
 - `OnDemandEventData`: Model for live view requests
 
+## Documentation
+
+Detailed documentation for specific components is available:
+
+- [LiveView Client Documentation](docs/live_view_client.md): Explains the WebRTC-based live view functionality
+- [Troubleshooting 4002 Errors](docs/troubleshooting_4002_error.md): Solutions for common WebRTC connection errors
+
 ## Troubleshooting
 
 ### Common Issues
@@ -230,7 +269,14 @@ Events are structured using Pydantic models:
    - Check database connection strings
    - Verify network storage credentials
 
-3. **Event Listener Issues**
+3. **WebRTC Connection Errors**
+
+   - If you see a 4002 error when connecting to live view, see [Troubleshooting 4002 Errors](docs/troubleshooting_4002_error.md)
+   - For detailed information about the WebRTC live view implementation, see [LiveView Client Documentation](docs/live_view_client.md)
+   - Ensure your account ID is correctly retrieved
+   - Check your message format matches Ring's 2025 API requirements
+
+4. **Event Listener Issues**
    - Ensure your Ring devices are online
    - Check your network connection
    - Verify your Ring account has the necessary permissions
@@ -250,6 +296,10 @@ Please follow our coding standards:
 - PEP 8 for code style
 - PEP 484 for type hints
 - PEP 257 for docstrings
+
+## Prior work
+
+https://pkg.go.dev/github.com/AlexxIT/go2rtc/pkg/ring
 
 ## License
 

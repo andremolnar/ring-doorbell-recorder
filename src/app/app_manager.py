@@ -65,6 +65,14 @@ class AppManager:
         # Get the authenticated API instance
         ring_api = self._auth_manager.api
         
+        # Try to get and log the account ID
+        try:
+            account_id = await self._auth_manager.get_account_id()
+            logger.info("Retrieved Ring account ID", account_id=account_id)
+        except Exception as e:
+            logger.warning("Failed to retrieve account ID", error=str(e))
+            # Continue with initialization even if getting account ID fails
+        
         # Get devices
         try:
             await ring_api.async_update_data()

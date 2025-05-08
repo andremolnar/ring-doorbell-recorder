@@ -98,21 +98,24 @@ class IEventListener(abc.ABC):
     async def start(self) -> None:
         """Start listening for events."""
         pass
+
+
+class VideoSink(abc.ABC):
+    """Abstract interface for video sinks in WebRTC-based live view."""
     
     @abc.abstractmethod
-    async def stop(self) -> None:
-        """Stop listening for events."""
+    async def write(self, frame) -> None:
+        """
+        Write a video frame or packet to the sink.
+        
+        Args:
+            frame: Video frame or packet from aiortc
+        """
         pass
     
     @abc.abstractmethod
-    def on(self, event_type: str, callback) -> None:
-        """
-        Register callback for event type.
-        
-        Args:
-            event_type: Type of event to listen for
-            callback: Callback function to invoke
-        """
+    async def close(self) -> None:
+        """Close the sink and release resources."""
         pass
 
 
@@ -142,5 +145,15 @@ class IAuthManager(abc.ABC):
         
         Returns:
             Authenticated API instance
+        """
+        pass
+        
+    @abc.abstractmethod
+    async def get_account_id(self) -> str:
+        """
+        Get the Ring account ID for the authenticated user.
+        
+        Returns:
+            Account ID for the authenticated user
         """
         pass

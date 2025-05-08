@@ -13,12 +13,16 @@ from pydantic import ValidationError
 from ring_doorbell.event import RingEvent
 from ring_doorbell import Ring
 
+from .live_view_client import LiveViewClient
+from .video_sinks import RecorderSink, CVFanoutSink
+
 from ..core.interfaces import (
     EventData,
     DingEventData,
     MotionEventData, 
     OnDemandEventData,
-    IStorage
+    IStorage,
+    VideoSink
 )
 
 
@@ -433,3 +437,130 @@ class CaptureEngine:
         finally:
             # Always restore the original Ring API
             self._ring_api = original_ring_api
+            
+    async def start_live_view(self, device_id: str, duration_sec: Optional[int] = None) -> Optional[str]:
+        """
+        Start a live WebRTC stream from a Ring device and save it to a file.
+        
+        Args:
+            device_id: ID of the Ring device to stream from
+            duration_sec: Optional override for the stream duration in seconds
+            
+        Returns:
+            Path to the saved video if successful, None otherwise
+        """
+        try:
+            if not self._ring_api:
+                logger.warning("No Ring API client available for live view")
+                return None
+                
+            # Get auth token from the Ring API
+            if hasattr(self._ring_api, 'auth') and hasattr(self._ring_api.auth, 'token'):
+                token = self._ring_api.auth.token.get("access_token")
+            else:
+                logger.error("Cannot access Ring API token")
+                return None
+                
+            if not token:
+                logger.error("No valid access token available")
+                return None
+                
+            # Create target directory for the video
+            timestamp = int(time.time())
+            video_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "captured_media",
+                device_id,
+                "live_view",
+                f"{timestamp}.mp4"
+            )
+            os.makedirs(os.path.dirname(video_path), exist_ok=True)
+            
+            # Create recorder sink and live view client
+            sink = RecorderSink(video_path)
+            client = LiveViewClient(token, device_id, sink)
+            
+            # Modify max duration if requested
+            if duration_sec is not None and isinstance(duration_sec, int):
+                client.MAX_DURATION = min(590, duration_sec)  # Cap at 590 seconds
+            
+            # Start the client
+            logger.info(f"Starting live view capture for device {device_id}")
+            await client.start()
+            
+            # Return path to the saved video
+            if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+                logger.info(f"Live view captured successfully to {video_path}")
+                
+                # Register the video in all storage implementations
+                for storage in self._storages:
+                    try:
+                        metadata = {
+                            "event_type": "live_view",
+                            "device_id": device_id,
+                            "extension": "mp4",
+                            "download_date": datetime.now().isoformat()
+                        }
+                        await storage.save_video(f"live_view_{timestamp}", video_path, metadata)
+                    except Exception as e:
+                        logger.error(f"Failed to register video in storage: {e}")
+                
+                return video_path
+            else:
+                logger.warning("Live view capture failed or produced empty file")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in start_live_view: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+            
+    async def start_live_view_fanout(self, device_id: str, storage_backends: List[IStorage],
+                                    duration_sec: Optional[int] = None) -> bool:
+        """
+        Start a live WebRTC stream from a Ring device and distribute frames to multiple storages.
+        
+        Args:
+            device_id: ID of the Ring device to stream from
+            storage_backends: List of storage backends to receive frames
+            duration_sec: Optional override for the stream duration in seconds
+            
+        Returns:
+            True if the stream was started successfully, False otherwise
+        """
+        try:
+            if not self._ring_api:
+                logger.warning("No Ring API client available for live view")
+                return False
+                
+            # Get auth token from the Ring API
+            if hasattr(self._ring_api, 'auth') and hasattr(self._ring_api.auth, 'token'):
+                token = self._ring_api.auth.token.get("access_token")
+            else:
+                logger.error("Cannot access Ring API token")
+                return False
+                
+            if not token:
+                logger.error("No valid access token available")
+                return False
+                
+            # Create fanout sink and live view client
+            sink = CVFanoutSink(*storage_backends)
+            client = LiveViewClient(token, device_id, sink)
+            
+            # Modify max duration if requested
+            if duration_sec is not None and isinstance(duration_sec, int):
+                client.MAX_DURATION = min(590, duration_sec)  # Cap at 590 seconds
+            
+            # Start the client
+            logger.info(f"Starting live view fanout for device {device_id}")
+            await client.start()
+            
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error in start_live_view_fanout: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False
