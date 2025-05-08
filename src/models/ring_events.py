@@ -1,6 +1,6 @@
 """SQLAlchemy models for Ring event data."""
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, LargeBinary
 from sqlalchemy.sql import func
 from src.models.base import Base
 
@@ -23,6 +23,11 @@ class RingEvent(Base):
     
     # Event specific data stored as JSON
     event_data = Column(Text, nullable=False)
+    
+    # Video related fields
+    has_video = Column(Boolean, nullable=False, server_default='0', index=True)
+    recording_id = Column(Integer, nullable=True)
+    video_url = Column(String(500), nullable=True)  # URL with protocol (file://, http://, s3://, etc.)
     
     # Tracking fields
     stored_at = Column(DateTime, server_default=func.now())

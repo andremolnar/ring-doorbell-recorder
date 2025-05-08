@@ -1,38 +1,16 @@
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-from sqlalchemy.ext.declarative import declarative_base
 from alembic import context
+import sys
+import os
 
-# Define our own Base for migrations
-Base = declarative_base()
+# Add the project root directory to Python's path to allow proper imports
+sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
-# This is a simplified approach where we define the tables directly for migrations
-# without importing the models, to avoid circular import issues
-from sqlalchemy import Column, Integer, String, Text, DateTime
-from sqlalchemy.sql import func
-
-class RingEvent(Base):
-    """SQLAlchemy model for Ring events."""
-    
-    __tablename__ = "ring_events"
-    
-    # Primary key and basic identification
-    id = Column(String(50), primary_key=True, index=True)
-    
-    # Event metadata
-    kind = Column(String(20), nullable=False, index=True)  # ding, motion, on_demand
-    created_at = Column(String(50), nullable=False, index=True)  # ISO format timestamp
-    
-    # Device information
-    device_id = Column(String(50), nullable=False, index=True)
-    device_name = Column(String(100), nullable=False)
-    
-    # Event specific data stored as JSON
-    event_data = Column(Text, nullable=False)
-    
-    # Tracking fields
-    stored_at = Column(DateTime, server_default=func.now())
+# Import the Base class and models from the project
+from src.models.base import Base
+from src.models.ring_events import RingEvent
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

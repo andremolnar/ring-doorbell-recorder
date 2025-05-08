@@ -3,6 +3,7 @@
 import asyncio
 import getpass
 import json
+import aiohttp
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -245,6 +246,96 @@ class RingAuthManager(IAuthManager):
             FCM credentials if available, None otherwise
         """
         return self._fcm_credentials
+    
+    def get_token(self) -> Optional[str]:
+        """
+        Get the Ring API access token.
+        
+        Returns:
+            Access token if available, None otherwise
+        """
+        if self._auth and hasattr(self._auth, '_token'):
+            return self._auth._token.get("access_token")
+        
+        # Try to load from the token file as fallback
+        try:
+            token_path = Path(self._token_path)
+            if token_path.exists():
+                token_data = json.loads(token_path.read_text())
+                return token_data.get("access_token")
+        except Exception as e:
+            print(f"× Failed to load token from file: {e}")
+            
+        return None
+    
+           
+    async def get_account_id(self) -> str:
+        """
+        Get the Ring account ID for the authenticated user.
+        
+        Returns:
+            Account ID for the authenticated user
+            
+        Raises:
+            AuthenticationError: If account ID cannot be retrieved
+        """
+        try:
+            # Get the account ID directly from the API using the reliable devices endpoint
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Bearer {self.get_token()}"}
+                
+                print("🔍 Getting account ID from ring_devices endpoint...")
+                response = await session.get(
+                    "https://api.ring.com/clients_api/ring_devices",
+                    headers=headers
+                )
+                
+                # Check response status
+                if response.status != 200:
+                    error_msg = f"Failed to get account ID: API returned status {response.status}"
+                    print(f"× {error_msg}")
+                    raise ValueError(error_msg)
+                
+                # Parse the response JSON
+                devices_data = await response.json()
+                
+                # Process device data to find account ID
+                # Look for doorbot devices first (Ring doorbells)
+                if "doorbots" in devices_data and isinstance(devices_data["doorbots"], list) and len(devices_data["doorbots"]) > 0:
+                    for doorbot in devices_data["doorbots"]:
+                        if "owner" in doorbot and isinstance(doorbot["owner"], dict) and "id" in doorbot["owner"]:
+                            owner_id = doorbot["owner"]["id"]
+                            print(f"✓ Found account ID: {owner_id}")
+                            return str(owner_id)
+                
+                # If no doorbots, try chimes
+                if "chimes" in devices_data and isinstance(devices_data["chimes"], list) and len(devices_data["chimes"]) > 0:
+                    for chime in devices_data["chimes"]:
+                        if "owner" in chime and isinstance(chime["owner"], dict) and "id" in chime["owner"]:
+                            owner_id = chime["owner"]["id"]
+                            print(f"✓ Found account ID: {owner_id}")
+                            return str(owner_id)
+                
+                # If no doorbots or chimes, check other device types
+                for device_type in devices_data:
+                    if isinstance(devices_data[device_type], list):
+                        for device in devices_data[device_type]:
+                            if isinstance(device, dict):
+                                if "owner" in device and isinstance(device["owner"], dict) and "id" in device["owner"]:
+                                    owner_id = device["owner"]["id"]
+                                    print(f"✓ Found account ID: {owner_id}")
+                                    return str(owner_id)
+                                if "owner_id" in device:
+                                    print(f"✓ Found account ID: {device['owner_id']}")
+                                    return str(device["owner_id"])
+                
+                # If we got here, no account ID was found in the response
+                error_msg = "No account ID found in the devices response"
+                print(f"× {error_msg}")
+                raise ValueError(error_msg)
+                
+        except Exception as e:
+            raise AuthenticationError(f"Failed to get account ID: {e}")
     
     def get_fcm_credentials_callback(self) -> Callable[[Dict[str, Any]], None]:
         """

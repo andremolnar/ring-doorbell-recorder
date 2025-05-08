@@ -1,7 +1,6 @@
 Flask
 requests
 sqlalchemy
-sqlite3
 pytest
 pydantic
 fastapi
@@ -11,3 +10,6 @@ structlog
 pyee
 aiosqlite
 ring-doorbell
+aiortc
+aiohttp
+websockets
