@@ -123,16 +123,16 @@ async def main():
         
         logger.info(f"Simulating ding event with ID: {event_id}")
         
-        # Monkey-patch the _update_event_with_video method to add logging
-        original_update_event_with_video = capture_engine._update_event_with_video
+        # Monkey-patch the _update_event_with_video_info method to add logging
+        original_update_event_with_video_info = capture_engine._update_event_with_video_info
         
-        async def debug_update_event_with_video(event_id, video_path):
-            logger.info(f"DEBUG: _update_event_with_video called with event_id={event_id}, video_path={video_path}")
-            result = await original_update_event_with_video(event_id, video_path)
-            logger.info(f"DEBUG: _update_event_with_video completed")
+        async def debug_update_event_with_video_info(event_id, video_path):
+            logger.info(f"DEBUG: _update_event_with_video_info called with event_id={event_id}, video_path={video_path}")
+            result = await original_update_event_with_video_info(event_id, video_path)
+            logger.info(f"DEBUG: _update_event_with_video_info completed")
             return result
             
-        capture_engine._update_event_with_video = debug_update_event_with_video
+        capture_engine._update_event_with_video_info = debug_update_event_with_video_info
         
         # Process the event
         await capture_engine.capture(event_data)

@@ -3,12 +3,10 @@
 import logging
 import time
 import os
-import aiohttp
 import json
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable, TypeVar, Type, Union, Tuple
-from pathlib import Path
+from typing import Dict, List, Optional, Any, Type, Union, Tuple
 
 from pydantic import ValidationError
 from ring_doorbell.event import RingEvent
@@ -24,7 +22,6 @@ from ..core.interfaces import (
     MotionEventData, 
     OnDemandEventData,
     IStorage,
-    VideoSink,
     IAuthManager
 )
 
@@ -171,15 +168,11 @@ class CaptureEngine:
         self._active_recordings[device_id] = event.id
         
         try:
-            # Start recording for about 30 seconds (typical ding event duration)
+            # Start recording for 30 seconds
             # Note: It's critical to pass the event_id parameter here so the recording
             # callback knows which event to associate the video with
-            video_path = await self.start_live_view(device_id, duration_sec=30, event_id=event.id)
-            
-            if video_path:
-                logger.info(f"Successfully started video recording for ding event {event.id}")
-            else:
-                logger.warning(f"Failed to record video for ding event {event.id}")
+            await self.start_live_view(device_id, duration_sec=30, event_id=event.id)
+
         except Exception as e:
             logger.error(f"Error recording video for ding event: {e}")
         finally:
@@ -212,122 +205,8 @@ class CaptureEngine:
         
         try:
             # Start recording for about 20 seconds (typical motion event duration)
-            video_path = await self.start_live_view(device_id, duration_sec=20, event_id=event.id)
+            await self.start_live_view(device_id, duration_sec=20, event_id=event.id)
             
-            if video_path:
-                logger.info(f"Successfully started video recording for motion event {event.id}")
-                
-                # Schedule a task to copy the video after recording completes
-                # This serves as a backup mechanism in case the recording callback fails
-                async def ensure_video_copied():
-                    try:
-                        # Give recording time to complete (25 seconds should be enough for a 20 second recording)
-                        await asyncio.sleep(25)
-                        
-                        # Check if the video file exists and has content
-                        if os.path.exists(video_path):
-                            file_size = os.path.getsize(video_path)
-                            logger.info(f"Video file exists at {video_path} with size {file_size}")
-                            
-                            # Check if the video is too small to be valid
-                            if file_size < 1000:
-                                logger.warning(f"Video file is too small, may be corrupt: {video_path} ({file_size} bytes)")
-                                return
-                            
-                            # Create the event directory
-                            event_dir = os.path.join(
-                                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                "captured_media",
-                                device_id,
-                                "motion",
-                                event.id
-                            )
-                            
-                            # Check if the event directory already exists and has a video file
-                            # This would mean the recording callback already worked
-                            event_video_path = os.path.join(event_dir, "video.mp4")
-                            if os.path.exists(event_video_path):
-                                logger.info(f"Video already exists at {event_video_path}, no need to copy")
-                                return
-                            
-                            # Create the directory if it doesn't exist
-                            os.makedirs(event_dir, exist_ok=True)
-                            
-                            # Copy the video file
-                            try:
-                                import shutil
-                                shutil.copy2(video_path, event_video_path)
-                                logger.info(f"Manually copied video from {video_path} to {event_video_path}")
-                                
-                                # Update the event with video information
-                                try:
-                                    # Get the latest event data from storage
-                                    updated_event = None
-                                    for storage in self._storages:
-                                        try:
-                                            updated_event = await storage.retrieve_event(event.id)
-                                            if updated_event:
-                                                break
-                                        except Exception as e:
-                                            logger.error(f"Error retrieving event: {e}")
-                                    
-                                    if updated_event:
-                                        # Check if video is already associated
-                                        if updated_event.has_video:
-                                            logger.info(f"Event {event.id} already has video associated")
-                                            return
-                                        
-                                        # Create updated event object
-                                        event_dict = updated_event.dict()
-                                        event_dict["has_video"] = True
-                                        event_dict["video_path"] = event_video_path
-                                        
-                                        # Create updated event object
-                                        event_class = self._event_types.get("motion", EventData)
-                                        updated_event = event_class(**event_dict)
-                                        
-                                        # Save the updated event to all storages
-                                        for storage in self._storages:
-                                            try:
-                                                await storage.save_event(updated_event)
-                                                logger.info(f"Updated event {event.id} with video information")
-                                            except Exception as e:
-                                                logger.error(f"Error updating event with video info: {e}", exc_info=True)
-                                    else:
-                                        # We couldn't retrieve the event, fall back to the original
-                                        event_dict = event.dict()
-                                        event_dict["has_video"] = True
-                                        event_dict["video_path"] = event_video_path
-                                        
-                                        # Create updated event object
-                                        event_class = self._event_types.get("motion", EventData)
-                                        updated_event = event_class(**event_dict)
-                                        
-                                        # Save the updated event to all storages
-                                        for storage in self._storages:
-                                            try:
-                                                await storage.save_event(updated_event)
-                                                logger.info(f"Updated event {event.id} with video information")
-                                            except Exception as e:
-                                                logger.error(f"Error updating event with video info: {e}", exc_info=True)
-                                except Exception as e:
-                                    logger.error(f"Error updating event with video info: {e}", exc_info=True)
-                            except Exception as e:
-                                logger.error(f"Error copying video file: {e}", exc_info=True)
-                        else:
-                            logger.warning(f"Video file not found at expected path: {video_path}")
-                    except Exception as e:
-                        logger.error(f"Unexpected error in ensure_video_copied: {e}", exc_info=True)
-                
-                # Start the background task
-                ensure_task = asyncio.create_task(ensure_video_copied())
-                # Add done callback to handle exceptions
-                ensure_task.add_done_callback(
-                    lambda t: logger.error(f"Error in ensure_video_copied task: {t.exception()}", exc_info=True) 
-                    if t.exception() else None
-                )
-            else:
-                logger.warning(f"Failed to start video recording for motion event {event.id}")
         except Exception as e:
             logger.error(f"Error recording video for motion event: {e}", exc_info=True)
         finally:
@@ -418,229 +297,6 @@ class CaptureEngine:
             logger.error(f"Event processing failed: {e}")
             return None
             
-    async def _capture_video(self, event_id: str, event_type: str) -> Optional[Tuple[str, bytes]]:
-        """
-        Attempt to download and store a video associated with an event.
-        
-        Args:
-            event_id: The ID of the event associated with the recording (also used as recording ID)
-            event_type: The type of event (ding, motion, etc.)
-            
-        Returns:
-            A tuple of (file_path, video_data) if successful, None otherwise
-        """
-        try:
-            logger.info(f"Attempting to download video for event {event_id}")
-            
-            if not self._ring_api:
-                logger.warning("No Ring API client available, cannot download video")
-                return None
-                
-            # Find the device associated with this event through the Ring API
-            # We need to find the device to use the API's recording download methods
-            devices = self._ring_api.devices()
-            
-            # Try to find the right device
-            target_device = None
-            
-            # First check doorbells and cameras
-            for device in devices.doorbots + devices.stickup_cams:
-                if str(event_id).startswith(str(device.id)):
-                    target_device = device
-                    break
-            
-            if not target_device:
-                logger.warning(f"Could not find device for recording ID: {event_id}")
-                
-                # Try a different approach - get the recording URL directly
-                try:
-                    # Create a temporary file path
-                    temp_path = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                        "captured_media", 
-                        f"temp_{event_id}.mp4"
-                    )
-                    
-                    # Ensure the directory exists
-                    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                    
-                    # Get the recording URL using the event ID directly 
-                    for device in devices.doorbots + devices.stickup_cams:
-                        try:
-                            # First check if we can get the recording URL
-                            recording_url = await device.async_recording_url(event_id)
-                            logger.info(f"Found recording URL: {recording_url}")
-                            
-                            if not recording_url:
-                                logger.warning("No recording URL returned - likely due to missing subscription")
-                                continue
-                            
-                            # Download the recording to a temporary file
-                            success = await device.async_recording_download(
-                                event_id, 
-                                filename=temp_path,
-                                override=True
-                            )
-                            
-                            if success and os.path.exists(temp_path):
-                                with open(temp_path, 'rb') as f:
-                                    video_data = f.read()
-                                    
-                                # Clean up temporary file
-                                try:
-                                    os.remove(temp_path)
-                                except:
-                                    pass
-                                    
-                                logger.info(f"Successfully downloaded video for event {event_id} ({len(video_data)} bytes)")
-                                
-                                # Continue with storage
-                                break
-                        except Exception as e:
-                            logger.debug(f"Error getting recording URL from device {device.name}: {e}")
-                            continue
-                    else:
-                        logger.warning(f"Could not get recording URL for ID: {event_id}")
-                        return None
-                        
-                except Exception as e:
-                    logger.error(f"Error downloading recording: {e}")
-                    return None
-            else:
-                # We found the device, use its methods to download the recording
-                try:
-                    # Create a temporary file path
-                    temp_path = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                        "captured_media", 
-                        f"temp_{event_id}.mp4"
-                    )
-                    
-                    # Ensure the directory exists
-                    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                    
-                    # Download the recording to a temporary file
-                    success = await target_device.async_recording_download(
-                        event_id, 
-                        filename=temp_path,
-                        override=True
-                    )
-                    
-                    if not success or not os.path.exists(temp_path):
-                        logger.warning(f"Failed to download recording {event_id}")
-                        return None
-                        
-                    # Read the video data from the temporary file
-                    with open(temp_path, 'rb') as f:
-                        video_data = f.read()
-                        
-                    # Clean up temporary file
-                    try:
-                        os.remove(temp_path)
-                    except:
-                        pass
-                        
-                    logger.info(f"Successfully downloaded video for event {event_id} ({len(video_data)} bytes)")
-                    
-                except Exception as e:
-                    logger.error(f"Error downloading recording: {e}")
-                    return None
-            
-            # Store the video in all configured storages
-            metadata = {
-                "event_type": event_type,
-                "recording_id": event_id,  # Use event_id as recording_id
-                "extension": "mp4",  # Ring videos are MP4 format
-                "download_date": datetime.now().isoformat()
-            }
-            
-            # Try to save the video in all configured storages
-            success_paths = []
-            for storage in self._storages:
-                try:
-                    file_path = await storage.save_video(event_id, video_data, metadata)
-                    if file_path:
-                        success_paths.append(file_path)
-                except Exception as e:
-                    logger.error(f"Failed to save video to storage: {e}",
-                                extra={"event_id": event_id, "storage": storage.__class__.__name__})
-            
-            # Update the event in storage with video information
-            if success_paths:
-                await self._update_event_with_video_info(event_id, success_paths[0])
-                logger.info(f"Video for event {event_id} saved successfully to {len(success_paths)} storage(s)")
-                return (success_paths[0], video_data)
-            else:
-                logger.warning(f"Video for event {event_id} could not be saved to any storage")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Unexpected error while capturing video for event {event_id}: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            return None
-            
-    async def capture_latest_videos(self, device_id: str, limit: int = 5) -> List[str]:
-        """
-        Capture the latest videos for a specific device.
-        
-        Args:
-            device_id: The ID of the device to capture videos for
-            limit: Maximum number of videos to capture
-            
-        Returns:
-            List of video paths that were successfully captured
-        """
-        # This is a placeholder for a real implementation that would:
-        # 1. Query the Ring API for recent history
-        # 2. Filter for events with the specified device ID
-        # 3. Attempt to download videos for those events
-        # 4. Return the paths to the saved videos
-        
-        # This would need a Ring API client reference that's not part of our current implementation
-        logger.warning("capture_latest_videos not fully implemented - requires Ring API client")
-        return []
-        
-    async def fetch_video_for_event(self, event_id: str, ring_api: Optional[Ring] = None) -> Optional[str]:
-        """
-        Fetch and store a video for a specific event.
-        
-        Args:
-            event_id: The ID of the event to fetch video for (also used as recording ID)
-            ring_api: Optional Ring API instance to use for this specific request
-            
-        Returns:
-            Path to the saved video if successful, None otherwise
-        """
-        # Use provided Ring API if available
-        original_ring_api = self._ring_api
-        
-        try:
-            # Set the Ring API client if one was provided
-            if ring_api:
-                self._ring_api = ring_api
-                
-            # Ensure we have an API client
-            if not self._ring_api:
-                logger.warning("No Ring API client available for video download")
-                return None
-                
-            # Since we don't know the event type, use a generic value
-            result = await self._capture_video(event_id, "unknown")
-            
-            if result:
-                return result[0]  # Return the path of the saved video
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error in fetch_video_for_event: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            return None
-            
-        finally:
-            # Always restore the original Ring API
-            self._ring_api = original_ring_api
             
     async def start_live_view(self, device_id: str, duration_sec: Optional[int] = None, event_id: Optional[str] = None) -> Optional[str]:
         """
@@ -735,113 +391,7 @@ class CaptureEngine:
             logger.debug(traceback.format_exc())
             return None
             
-    async def start_live_view_fanout(self, device_id: str, storage_backends: List[IStorage],
-                                    duration_sec: Optional[int] = None, event_id: Optional[str] = None) -> bool:
-        """
-        Start a live WebRTC stream from a Ring device and distribute frames to multiple storages.
-        
-        Args:
-            device_id: ID of the Ring device to stream from
-            storage_backends: List of storage backends to receive frames
-            duration_sec: Optional override for the stream duration in seconds
-            event_id: Optional event ID to associate with this recording
-            
-        Returns:
-            True if the stream was started successfully, False otherwise
-        """
-        try:
-            # First try to get token from auth_manager if available
-            token = None
-            if self._auth_manager:
-                try:
-                    # Get fresh token from auth_manager
-                    token = self._auth_manager.get_token()
-                    if not token:
-                        logger.error("No valid token available from auth_manager")
-                except Exception as e:
-                    logger.error(f"Error getting token from auth_manager: {e}")
-            
-            # Fall back to ring_api if auth_manager is not available or failed
-            if not token and self._ring_api:
-                if hasattr(self._ring_api, 'auth') and hasattr(self._ring_api.auth, 'token'):
-                    token = self._ring_api.auth.token.get("access_token")
-            
-            # Check if we have a valid token
-            if not token:
-                logger.error("Cannot access Ring API token")
-                return False
-                
-            # Create fanout sink and live view client
-            sink = CVFanoutSink(*storage_backends)
-            client = LiveViewClient(token, device_id, sink)
-            
-            # Modify max duration if requested
-            if duration_sec is not None and isinstance(duration_sec, int):
-                client.MAX_DURATION = min(590, duration_sec)  # Cap at 590 seconds
-            
-            # Start the client
-            logger.info(f"Starting live view fanout for device {device_id}")
-            await client.start()
-            
-            # If we have an event ID, emit a signal that recording has started
-            if event_id:
-                self._event_bus.emit("recording_started", {
-                    "event_id": event_id,
-                    "device_id": device_id,
-                    "timestamp": int(time.time()),
-                    "duration": duration_sec
-                })
-            
-            return True
-                
-        except Exception as e:
-            logger.error(f"Error in start_live_view_fanout: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            return False
     
-    async def _update_event_with_video(self, event_id: str, video_path: str) -> None:
-        """
-        Update an event with video information and store in all storage backends.
-        
-        Args:
-            event_id: ID of the event to update
-            video_path: Path to the recorded video file
-        """
-        # First retrieve the event from storage
-        event = None
-        for storage in self._storages:
-            try:
-                event = await storage.retrieve_event(event_id)
-                if event:
-                    break
-            except Exception as e:
-                logger.error(f"Error retrieving event {event_id}: {e}")
-        
-        if not event:
-            logger.warning(f"Could not find event {event_id} to update with video")
-            return
-            
-        # Create metadata for the video
-        metadata = {
-            "event_id": event_id,
-            "event_type": event.kind,
-            "device_id": event.device_id,
-            "device_name": event.device_name,
-            "recording_id": f"liveview_{int(time.time())}",
-            "extension": "mp4",
-            "capture_date": datetime.now().isoformat()
-        }
-        
-        # Save video to all storages
-        for storage in self._storages:
-            try:
-                # Use absolute path for the video file
-                if os.path.exists(video_path):
-                    file_path = await storage.save_video(event_id, video_path, metadata)
-                    logger.info(f"Saved video to storage {storage.__class__.__name__}: {file_path}")
-            except Exception as e:
-                logger.error(f"Error saving video to storage {storage.__class__.__name__}: {e}")
     
     async def _update_event_with_video_info(self, event_id: str, video_path: str) -> None:
         """
