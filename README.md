@@ -4,7 +4,7 @@ A modern, event-driven application for capturing and storing events from Ring Do
 
 ## Project Overview
 
-This application captures events (doorbell rings, motion detection, etc.) from Ring Doorbell and camera devices, processes them into structured data, and stores them securely. It automatically downloads and stores video recordings associated with events. The application uses a clean architecture approach with well-defined components and clear separation of concerns.
+This application captures events (doorbell rings, motion detection, etc.) from Ring Doorbell and camera devices, processes them into structured data, and stores them securely. As events happen, recordings are started and saved along with the event data. The application uses a clean architecture approach with well-defined components and clear separation of concerns.
 
 Key features:
 
@@ -77,7 +77,7 @@ Key features:
 2. Run the application:
 
    ```bash
-   python src/main.py
+   python src/run.py
    ```
 
 3. The application will:
@@ -86,29 +86,7 @@ Key features:
    - Start listening for events
    - Capture and store events to configured storage backends
 
-### Manual Testing
-
-The repository includes standalone test scripts to simulate Ring events and verify the recording functionality:
-
-- `test_motion_event.py`: Simulates a motion detection event and tests the full capture flow
-- `test_ding_event.py`: Simulates a doorbell ring event and tests the full capture flow
-
-To run these test scripts:
-
-```bash
-# Activate the Conda environment first
-conda activate ringdoorbell
-
-# Simulate a motion event
-python test_motion_event.py
-
-# Simulate a doorbell ring event
-python test_ding_event.py
-```
-
-These scripts are useful for verifying that the capture engine correctly processes different event types and stores the associated video recordings.
-
-### Testing Live View
+### Testing Live View Video Recording
 
 The repository includes a standalone script `live_view_example.py` to test on-demand video recording from your Ring doorbell or camera. This allows you to verify WebRTC connectivity and test the LiveView functionality separately from the main application.
 
@@ -136,6 +114,28 @@ Arguments:
 - `--output-dir` or `-o`: Directory to save the captured video (default: captured_media)
 
 The captured video will be saved as an MP4 file with a timestamp filename in the specified output directory.
+
+### Manual Event Testing
+
+The repository includes standalone test scripts to simulate Ring events and verify the recording functionality:
+
+- `test_motion_event.py`: Simulates a motion detection event and tests the full capture flow
+- `test_ding_event.py`: Simulates a doorbell ring event and tests the full capture flow
+
+To run these test scripts:
+
+```bash
+# Activate the Conda environment first
+conda activate ringdoorbell
+
+# Simulate a motion event
+python test_motion_event.py
+
+# Simulate a doorbell ring event
+python test_ding_event.py
+```
+
+These scripts are useful for verifying that the capture engine correctly processes different event types and stores the associated video recordings.
 
 ### Database Management
 
@@ -226,28 +226,6 @@ The application supports multiple storage backends:
 - **DatabaseStorage**: SQLAlchemy-based database storage
 - **FileStorage**: JSON file storage with date-based organization
 - **NetworkStorage**: Remote storage (S3, SFTP) using fsspec
-
-### Design Patterns
-
-The application leverages several design patterns:
-
-1. **Dependency Injection**
-
-   - Components receive dependencies via constructor
-   - Improves testability and flexibility
-
-2. **Observer / Event Bus**
-
-   - Event-driven architecture using PyEE
-   - Decoupled event producers and consumers
-
-3. **Strategy Pattern**
-
-   - Interface for storage implementations
-   - Easily swap or combine storage strategies
-
-4. **Factory Pattern**
-   - App Manager and main.py create and wire components
 
 ## API Documentation
 
