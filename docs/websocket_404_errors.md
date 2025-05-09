@@ -90,7 +90,7 @@ You can adjust the following parameters in `live_view_client.py` to change the r
 
 ```python
 # How often to check if ticket renewal is needed (in seconds)
-TICKET_CHECK_INTERVAL = 2400 # 40 minutes
+TICKET_CHECK_INTERVAL = 180  # 3 minutes
 
 # Maximum number of connection retries before giving up
 MAX_RETRIES = 3
@@ -99,6 +99,8 @@ MAX_RETRIES = 3
 INITIAL_BACKOFF = 2
 
 # Maximum backoff time in seconds
+MAX_BACKOFF = 30
+```
 MAX_BACKOFF = 30
 ```
 

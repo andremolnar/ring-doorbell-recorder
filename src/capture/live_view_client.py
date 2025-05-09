@@ -76,10 +76,15 @@ class LiveViewClient:
             A tuple of (ticket, region) - refreshed if necessary
         """
         # If it's been less than TICKET_CHECK_INTERVAL since last update, use current ticket
-        if self._ticket and time.time() - self._ticket_updated_at < self.TICKET_CHECK_INTERVAL:
+        current_time = time.time()
+        time_since_refresh = current_time - self._ticket_updated_at
+        
+        # If we have a valid ticket that's not too old, use it
+        if self._ticket and time_since_refresh < self.TICKET_CHECK_INTERVAL:
+            logger.debug(f"Using existing ticket (age: {time_since_refresh:.1f}s)")
             return self._ticket, self._region
             
-        logger.info("Refreshing signalsocket ticket...")
+        logger.info(f"Refreshing signalsocket ticket (age: {time_since_refresh:.1f}s)...")
         
         try:
             # Get a fresh ticket using _get_ticket method
@@ -92,7 +97,7 @@ class LiveViewClient:
             # Update our stored ticket and timestamp
             self._ticket = ticket
             self._region = region
-            self._ticket_updated_at = time.time()
+            self._ticket_updated_at = current_time
             logger.info(f"Signalsocket ticket refreshed successfully")
                 
             return ticket, region
@@ -596,10 +601,15 @@ class LiveViewClient:
 
     async def _ticket_refresh_loop(self):
         """Periodically check and refresh the signalsocket ticket."""
+        backoff_time = 5  # Start with 5 seconds backoff
+        
         while not self._stop.is_set():
             try:
                 # Check if ticket needs refreshing (this will refresh if needed)
                 await self._check_and_refresh_ticket()
+                
+                # Reset backoff on success
+                backoff_time = 5
                 
                 # Wait for next check interval with short timeouts to be responsive to cancellation
                 remaining = self.TICKET_CHECK_INTERVAL
@@ -613,7 +623,13 @@ class LiveViewClient:
                 break
             except Exception as e:
                 logger.error(f"Error in ticket refresh loop: {e}")
-                await asyncio.sleep(60)  # Wait a bit before retrying after an error
+                
+                # Use exponential backoff for errors
+                logger.info(f"Will retry ticket refresh in {backoff_time} seconds")
+                await asyncio.sleep(backoff_time)
+                
+                # Increase backoff time for next attempt (with a max)
+                backoff_time = min(backoff_time * 2, self.MAX_BACKOFF)
 
     async def stop(self):
         """Stop the client and clean up resources."""
@@ -718,6 +734,12 @@ class LiveViewClient:
                     if "Connection" in str(e) or any(x in str(e).lower() for x in ["closed", "shutdown", "reset"]):
                         # Connection errors should trigger a stop
                         logger.warning("Connection error in track handling, stopping client")
+                        
+                        # If this is a connection reset error, force ticket refresh on next attempt
+                        if "reset by peer" in str(e).lower():
+                            logger.warning("Connection reset by peer detected - forcing ticket refresh on next attempt")
+                            self._ticket_updated_at = 0  # Force ticket refresh
+                            
                         await self.stop()
                         break
                     
@@ -861,13 +883,19 @@ class LiveViewClient:
                     
                     # Check if it's a known connection error
                     is_connection_error = "Connection" in str(e) or any(
-                        x in str(e).lower() for x in ["closed", "shutdown", "reset", "404"]
+                        x in str(e).lower() for x in ["closed", "shutdown", "reset", "404", "connection reset"]
                     )
                     
                     # Log connection errors but not too verbosely
                     if is_connection_error:
                         logger.warning(f"WebSocket connection error: {e} (attempt {consecutive_errors} of {max_errors})")
                         
+                        # If we detect a connection reset or 404 error, it might be related to an expired ticket
+                        if "reset by peer" in str(e).lower() or "404" in str(e):
+                            logger.warning("Connection reset or 404 detected - likely expired ticket. Forcing refresh.")
+                            # Force ticket refresh immediately
+                            self._ticket_updated_at = 0
+                            
                         if consecutive_errors >= max_errors:
                             logger.error("Too many consecutive WebSocket errors, stopping client")
                             await self.stop()

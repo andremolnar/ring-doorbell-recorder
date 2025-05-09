@@ -15,9 +15,10 @@ class Config:
         self.ring_email = os.getenv('RING_EMAIL', 'your_email@example.com')
         self.ring_password = os.getenv('RING_PASSWORD', 'your_password')
         
-        # Token storage
+        # Token storage - use project root directory
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         self.token_path = os.getenv('RING_TOKEN_PATH', 
-                               str(Path.home() / '.ring_token.cache'))
+                               os.path.join(project_root, 'ring_token.cache'))
         
         # Storage paths
         self.database_path = os.getenv('RING_DB_PATH', 

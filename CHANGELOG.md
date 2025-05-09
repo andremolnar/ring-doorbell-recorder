@@ -13,12 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Periodic signalsocket ticket refresh to prevent 404 errors
   - Robust reconnection logic with exponential backoff
   - Detailed documentation on WebSocket 404 error troubleshooting
+- Enhanced AuthManager with account ID caching:
+  - Added persistent cache for account ID to reduce API calls
+  - Added memory and disk caching of account ID
+  - Improved performance by eliminating redundant API requests
+- Changed cache file locations from user's home directory to project root for better portability
 
 ### Fixed
 
 - Fixed WebSocket 404 errors related to expired signalsocket tickets
 - Implemented automatic ticket renewal for long-running sessions
 - Added retry mechanism with exponential backoff for failed connections
+- Improved detection of connection reset errors to trigger immediate ticket refresh
+- Enhanced error handling in ticket refresh loop with exponential backoff
 
 ## [0.2.0] - 2025-05-08
 
