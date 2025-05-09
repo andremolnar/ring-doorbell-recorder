@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Improved WebRTC live view client implementation:
+  - Periodic signalsocket ticket refresh to prevent 404 errors
+  - Robust reconnection logic with exponential backoff
+  - Detailed documentation on WebSocket 404 error troubleshooting
+
+### Fixed
+
+- Fixed WebSocket 404 errors related to expired signalsocket tickets
+- Implemented automatic ticket renewal for long-running sessions
+- Added retry mechanism with exponential backoff for failed connections
+
+## [0.2.0] - 2025-05-08
+
+### Added
+
 - Event-specific handling for different Ring event types (ding, motion, on-demand)
 - Support for "other" event type category to handle non-standard events
 - Enhanced test suite for event-specific handling
@@ -16,16 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error handling for storage operations
 - Return values from storage save operations to indicate success/failure
 - Updated documentation for event-specific processing capabilities
-- Comprehensive WebRTC live view client implementation:
+
+### Changed
+
+- Enhanced WebRTC connection management:
   - Support for both modern and legacy Ring API endpoints
   - Automatic region detection for optimal server selection
   - Proper WebRTC negotiation following Ring's protocol
   - Real-time video streaming with frame rate monitoring
   - Configurable recording duration with battery-safe defaults
   - Resilient error handling and connection monitoring
-
-### Changed
-
 - Modified event dispatching to prevent duplicate event processing
 - Enhanced logging to differentiate between new events and duplicates
 - Updated IStorage interface to return boolean status from save operations
