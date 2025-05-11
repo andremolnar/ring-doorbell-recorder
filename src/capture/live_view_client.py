@@ -1034,6 +1034,28 @@ class LiveViewClient:
                 logger.error(f"Unhandled error in message monitor: {e}")
                 await self.stop()
 
+    async def _timeout_guard(self):
+        """
+        Enforce a maximum duration for the WebRTC session to conserve resources.
+        This method will automatically stop the session after MAX_DURATION seconds.
+        """
+        logger.info(f"Timeout guard started - session will end after {self.MAX_DURATION} seconds")
+        try:
+            # Wait for the maximum duration
+            await asyncio.sleep(self.MAX_DURATION)
+            
+            # If we reach here without being cancelled, it's time to stop
+            if not self._stop.is_set():
+                logger.info(f"Maximum session duration ({self.MAX_DURATION}s) reached, stopping")
+                print(f"⏱️ Maximum session duration ({self.MAX_DURATION}s) reached")
+                await self.stop()
+                
+        except asyncio.CancelledError:
+            logger.debug("Timeout guard cancelled")
+        except Exception as e:
+            logger.error(f"Error in timeout guard: {e}")
+            # Don't stop the client here, just let the guard end
+    
     def _setup_wake_detection(self):
         """Set up wake detection to reconnect after system sleep."""
         if self._connection_monitor is None:

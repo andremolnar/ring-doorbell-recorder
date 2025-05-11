@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed LiveViewClient missing `_timeout_guard` method that was causing attribute errors
+- Added proper timeout guard implementation for WebRTC sessions
 - Fixed WebSocket 404 errors related to expired signalsocket tickets
 - Implemented automatic ticket renewal for long-running sessions
 - Added retry mechanism with exponential backoff for failed connections

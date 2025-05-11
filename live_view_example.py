@@ -25,9 +25,14 @@ from src.capture.video_sinks import RecorderSink
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# Set Ring live package to debug level
+logging.getLogger("ring.live").setLevel(logging.DEBUG)
+logging.getLogger("websockets").setLevel(logging.DEBUG)
+logging.getLogger("aioice").setLevel(logging.INFO)
 
 logger = logging.getLogger("ring-live-view")
 
