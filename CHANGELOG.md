@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Enhanced sleep prevention with multiple modes:
+  - Added configurable sleep prevention modes (PREVENT_ALL, PREVENT_SYSTEM_ONLY, PREVENT_DISK_ONLY)
+  - Added command-line arguments to control sleep prevention behavior
+  - Created comprehensive documentation for sleep prevention and wake detection
+  - Added test script to verify sleep prevention functionality
 - Improved WebRTC live view client implementation:
   - Periodic signalsocket ticket refresh to prevent 404 errors
   - Robust reconnection logic with exponential backoff
@@ -18,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added memory and disk caching of account ID
   - Improved performance by eliminating redundant API requests
 - Changed cache file locations from user's home directory to project root for better portability
+
+### Changed
+
+- Modified sleep prevention to allow display sleep while maintaining network connectivity
+- Improved wake detection with more reliable network connectivity monitoring
 
 ### Fixed
 

@@ -21,6 +21,7 @@ from src.api.event_listener import RingEventListener
 from src.storage.storage_impl import DatabaseStorage, FileStorage, NetworkStorage
 from src.capture.capture_engine import CaptureEngine
 from src.app.app_manager import AppManager
+from src.utils.sleep_prevention import SleepMode
 from src.config import Config as AppConfig
 
 
@@ -74,6 +75,55 @@ file_handler = logging.getLogger().handlers[1]
 file_handler.setFormatter(file_formatter)
 
 logger = structlog.get_logger()
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Ring Doorbell Capture Application")
+    
+    # Sleep mode options
+    sleep_group = parser.add_argument_group("Sleep prevention options")
+    sleep_group.add_argument(
+        "--no-sleep-prevention", 
+        action="store_false",
+        dest="prevent_sleep",
+        help="Disable sleep prevention entirely (default: enabled)"
+    )
+    
+    sleep_group.add_argument(
+        "--sleep-mode",
+        type=str,
+        choices=["all", "system", "disk", "none"],
+        default="system",
+        help=(
+            "Sleep prevention mode: "
+            "'all' prevents system, display and disk sleep; "
+            "'system' prevents system sleep but allows display sleep; "
+            "'disk' prevents only disk sleep; "
+            "'none' same as --no-sleep-prevention (default: system)"
+        )
+    )
+    
+    args = parser.parse_args()
+    
+    # Convert sleep mode string to enum
+    sleep_mode_map = {
+        "all": SleepMode.PREVENT_ALL,
+        "system": SleepMode.PREVENT_SYSTEM_ONLY,
+        "disk": SleepMode.PREVENT_DISK_ONLY,
+        "none": None  # Will be handled by prevent_sleep=False
+    }
+    
+    # If sleep mode is none, ensure prevent_sleep is False
+    if args.sleep_mode == "none":
+        args.prevent_sleep = False
+    
+    return {
+        "prevent_sleep": args.prevent_sleep,
+        "sleep_mode": sleep_mode_map.get(args.sleep_mode, SleepMode.PREVENT_SYSTEM_ONLY)
+    }
 
 
 async def cleanup_aiohttp_resources():
@@ -193,8 +243,23 @@ async def main():
         # Create the event listener
         event_listener = RingEventListener(ring_api, auth_manager)
         
+        # Use sleep prevention settings from config
+        prevent_sleep = config.get('prevent_sleep', True)
+        sleep_mode = config.get('sleep_mode', SleepMode.PREVENT_SYSTEM_ONLY)
+        
+        logger.info(f"Sleep prevention: {'Enabled' if prevent_sleep else 'Disabled'}")
+        if prevent_sleep and sleep_mode:
+            mode_name = str(sleep_mode).split('.')[-1]
+            logger.info(f"Sleep mode: {mode_name}")
+        
         # Create the application manager
-        app_manager = AppManager(auth_manager, event_listener, capture_engine)
+        app_manager = AppManager(
+            auth_manager, 
+            event_listener, 
+            capture_engine,
+            prevent_sleep=prevent_sleep,
+            sleep_mode=sleep_mode
+        )
         
         # Initialize and start the application
         await app_manager.initialize()
@@ -246,6 +311,12 @@ if __name__ == "__main__":
     
     # Use try/except to ensure clean exit even if asyncio.run fails
     try:
+        # Parse command-line arguments
+        args = parse_arguments()
+        
+        # Update config with parsed arguments
+        AppConfig.update(args)
+        
         exit_code = asyncio.run(main())
         sys.exit(exit_code or 0)
     except KeyboardInterrupt:

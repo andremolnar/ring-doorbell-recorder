@@ -3,10 +3,15 @@
 import asyncio
 import logging
 import structlog
+import platform
+import subprocess
+import os
+import signal
 from typing import Dict, List, Optional, Any, Tuple
 
 from ..core.interfaces import IAuthManager, IEventListener, IStorage
 from ..capture.capture_engine import CaptureEngine
+from ..utils.sleep_prevention import SleepPrevention, SleepMode
 
 
 # Configure structured logging
@@ -30,7 +35,9 @@ class AppManager:
         self,
         auth_manager: IAuthManager,
         event_listener: IEventListener,
-        capture_engine: CaptureEngine
+        capture_engine: CaptureEngine,
+        prevent_sleep: bool = True,
+        sleep_mode: SleepMode = SleepMode.PREVENT_SYSTEM_ONLY
     ):
         """
         Initialize the AppManager.
@@ -39,12 +46,17 @@ class AppManager:
             auth_manager: Authentication manager for Ring API
             event_listener: Event listener for Ring events
             capture_engine: Engine for processing and storing events
+            prevent_sleep: Whether to prevent system sleep while running
+            sleep_mode: Sleep prevention mode to use (default: PREVENT_SYSTEM_ONLY - 
+                        prevents system sleep but allows display sleep)
         """
         self._auth_manager = auth_manager
         self._event_listener = event_listener
         self._capture_engine = capture_engine
         self._running = False
         self._devices = {}
+        self._prevent_sleep = prevent_sleep
+        self._sleep_prevention = SleepPrevention(mode=sleep_mode) if prevent_sleep else None
     
     async def initialize(self) -> None:
         """
@@ -209,6 +221,22 @@ class AppManager:
         try:
             await self._event_listener.start()
             self._running = True
+            
+            # Start sleep prevention if enabled
+            if self._sleep_prevention:
+                if self._sleep_prevention.start():
+                    mode_name = str(self._sleep_prevention.mode).split('.')[-1]
+                    if self._sleep_prevention.mode == SleepMode.PREVENT_ALL:
+                        logger.info(f"Sleep prevention activated with mode: {mode_name} - "
+                                  f"system and display will not sleep")
+                    elif self._sleep_prevention.mode == SleepMode.PREVENT_SYSTEM_ONLY:
+                        logger.info(f"Sleep prevention activated with mode: {mode_name} - "
+                                  f"system will not sleep but display can sleep to save power")
+                    else:
+                        logger.info(f"Sleep prevention activated with mode: {mode_name}")
+                else:
+                    logger.warning("Failed to activate sleep prevention - system may sleep")
+            
             logger.info("Ring Doorbell application started successfully")
         except Exception as e:
             logger.error("Failed to start application", error=str(e))
@@ -235,6 +263,11 @@ class AppManager:
         
         # Clear any references that might prevent cleanup
         self._devices.clear()
+        
+        # Stop sleep prevention if active
+        if self._sleep_prevention and self._sleep_prevention.is_active:
+            await self._sleep_prevention.stop_async()
+            logger.info("Sleep prevention deactivated - system can sleep normally")
         
         # Force garbage collection to help with resource cleanup
         try:
@@ -271,3 +304,58 @@ class AppManager:
                          device_id=chime.id,
                          device_name=chime.name,
                          device_type="chime")
+    
+    def set_sleep_mode(self, mode: SleepMode) -> bool:
+        """
+        Change the sleep prevention mode dynamically.
+        
+        Args:
+            mode: The new sleep prevention mode to use
+            
+        Returns:
+            bool: True if the mode was changed successfully, False otherwise
+        """
+        if not self._sleep_prevention:
+            logger.warning("Sleep prevention is disabled, cannot change mode")
+            return False
+            
+        # If we're running, we need to restart sleep prevention
+        was_active = self._sleep_prevention.is_active
+        
+        if was_active:
+            self._sleep_prevention.stop()
+            
+        # Set the new mode
+        self._sleep_prevention.set_mode(mode)
+        logger.info(f"Sleep prevention mode changed to {str(mode).split('.')[-1]}")
+        
+        # If it was active, restart it
+        result = True
+        if was_active:
+            result = self._sleep_prevention.start()
+            if result:
+                mode_name = str(mode).split('.')[-1]
+                if mode == SleepMode.PREVENT_ALL:
+                    logger.info(f"Sleep prevention restarted with mode: {mode_name} - "
+                              f"system and display will not sleep")
+                elif mode == SleepMode.PREVENT_SYSTEM_ONLY:
+                    logger.info(f"Sleep prevention restarted with mode: {mode_name} - "
+                              f"system will not sleep but display can sleep to save power")
+                else:
+                    logger.info(f"Sleep prevention restarted with mode: {mode_name}")
+            else:
+                logger.warning("Failed to restart sleep prevention after mode change")
+                
+        return result
+    
+    def get_sleep_mode(self) -> Optional[SleepMode]:
+        """
+        Get the current sleep prevention mode.
+        
+        Returns:
+            Optional[SleepMode]: The current sleep mode, or None if sleep prevention is disabled
+        """
+        if not self._sleep_prevention:
+            return None
+            
+        return self._sleep_prevention.mode
