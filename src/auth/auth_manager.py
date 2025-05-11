@@ -41,12 +41,19 @@ class RingAuthManager(IAuthManager):
         self._ring = None
         self._fcm_token_path = fcm_token_path or token_path.replace('.cache', '_fcm.cache')
         self._fcm_credentials = None
+        self._cached_account_id = None  # Store account ID in memory
+        
+        # Path for caching account ID
+        self._account_id_path = token_path.replace('.cache', '_account_id.cache')
         
         # Create token callback
         self._token_callback = self._create_token_callback(token_path)
         
         # Load FCM credentials if they exist
         self._load_fcm_credentials()
+        
+        # Load cached account ID if it exists
+        self._load_cached_account_id()
     
     def _create_token_callback(self, token_path: str) -> Callable:
         """
@@ -74,6 +81,33 @@ class RingAuthManager(IAuthManager):
             except Exception as e:
                 print(f"× Failed to load FCM credentials: {e}")
                 self._fcm_credentials = None
+    
+    def _load_cached_account_id(self) -> None:
+        """
+        Load cached account ID from disk if it exists.
+        """
+        account_id_path = Path(self._account_id_path)
+        if account_id_path.is_file():
+            try:
+                self._cached_account_id = account_id_path.read_text().strip()
+                print(f"✓ Loaded cached account ID: {self._cached_account_id}")
+            except Exception as e:
+                print(f"× Failed to load cached account ID: {e}")
+                self._cached_account_id = None
+    
+    def _save_cached_account_id(self, account_id: str) -> None:
+        """
+        Save account ID to disk for future use.
+        
+        Args:
+            account_id: Account ID to save
+        """
+        try:
+            Path(self._account_id_path).write_text(account_id)
+            self._cached_account_id = account_id
+            print(f"✓ Saved account ID to {self._account_id_path}")
+        except Exception as e:
+            print(f"× Failed to save account ID: {e}")
     
     def _save_fcm_credentials(self, credentials: Dict[str, Any]) -> None:
         """
@@ -279,6 +313,11 @@ class RingAuthManager(IAuthManager):
         Raises:
             AuthenticationError: If account ID cannot be retrieved
         """
+        # Return cached account ID if available
+        if self._cached_account_id:
+            print(f"✓ Using cached account ID: {self._cached_account_id}")
+            return self._cached_account_id
+            
         try:
             # Get the account ID directly from the API using the reliable devices endpoint
             async with aiohttp.ClientSession() as session:
@@ -306,6 +345,8 @@ class RingAuthManager(IAuthManager):
                         if "owner" in doorbot and isinstance(doorbot["owner"], dict) and "id" in doorbot["owner"]:
                             owner_id = doorbot["owner"]["id"]
                             print(f"✓ Found account ID: {owner_id}")
+                            # Cache the account ID for future use
+                            self._save_cached_account_id(str(owner_id))
                             return str(owner_id)
                 
                 # If no doorbots, try chimes
@@ -314,6 +355,8 @@ class RingAuthManager(IAuthManager):
                         if "owner" in chime and isinstance(chime["owner"], dict) and "id" in chime["owner"]:
                             owner_id = chime["owner"]["id"]
                             print(f"✓ Found account ID: {owner_id}")
+                            # Cache the account ID for future use
+                            self._save_cached_account_id(str(owner_id))
                             return str(owner_id)
                 
                 # If no doorbots or chimes, check other device types
@@ -324,9 +367,13 @@ class RingAuthManager(IAuthManager):
                                 if "owner" in device and isinstance(device["owner"], dict) and "id" in device["owner"]:
                                     owner_id = device["owner"]["id"]
                                     print(f"✓ Found account ID: {owner_id}")
+                                    # Cache the account ID for future use
+                                    self._save_cached_account_id(str(owner_id))
                                     return str(owner_id)
                                 if "owner_id" in device:
                                     print(f"✓ Found account ID: {device['owner_id']}")
+                                    # Cache the account ID for future use
+                                    self._save_cached_account_id(str(device["owner_id"]))
                                     return str(device["owner_id"])
                 
                 # If we got here, no account ID was found in the response

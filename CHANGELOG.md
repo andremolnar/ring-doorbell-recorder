@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Enhanced sleep prevention with multiple modes:
+  - Added configurable sleep prevention modes (PREVENT_ALL, PREVENT_SYSTEM_ONLY, PREVENT_DISK_ONLY)
+  - Added command-line arguments to control sleep prevention behavior
+  - Created comprehensive documentation for sleep prevention and wake detection
+  - Added test script to verify sleep prevention functionality
+- Improved WebRTC live view client implementation:
+  - Periodic signalsocket ticket refresh to prevent 404 errors
+  - Robust reconnection logic with exponential backoff
+  - Detailed documentation on WebSocket 404 error troubleshooting
+- Enhanced AuthManager with account ID caching:
+  - Added persistent cache for account ID to reduce API calls
+  - Added memory and disk caching of account ID
+  - Improved performance by eliminating redundant API requests
+- Changed cache file locations from user's home directory to project root for better portability
+
+### Changed
+
+- Modified sleep prevention to allow display sleep while maintaining network connectivity
+- Improved wake detection with more reliable network connectivity monitoring
+
+### Fixed
+
+- Fixed WebSocket 404 errors related to expired signalsocket tickets
+- Implemented automatic ticket renewal for long-running sessions
+- Added retry mechanism with exponential backoff for failed connections
+- Improved detection of connection reset errors to trigger immediate ticket refresh
+- Enhanced error handling in ticket refresh loop with exponential backoff
+
+## [0.2.0] - 2025-05-08
+
+### Added
+
 - Event-specific handling for different Ring event types (ding, motion, on-demand)
 - Support for "other" event type category to handle non-standard events
 - Enhanced test suite for event-specific handling
@@ -16,16 +48,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error handling for storage operations
 - Return values from storage save operations to indicate success/failure
 - Updated documentation for event-specific processing capabilities
-- Comprehensive WebRTC live view client implementation:
+
+### Changed
+
+- Enhanced WebRTC connection management:
   - Support for both modern and legacy Ring API endpoints
   - Automatic region detection for optimal server selection
   - Proper WebRTC negotiation following Ring's protocol
   - Real-time video streaming with frame rate monitoring
   - Configurable recording duration with battery-safe defaults
   - Resilient error handling and connection monitoring
-
-### Changed
-
 - Modified event dispatching to prevent duplicate event processing
 - Enhanced logging to differentiate between new events and duplicates
 - Updated IStorage interface to return boolean status from save operations

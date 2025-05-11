@@ -15,6 +15,7 @@ from aiortc import (
 )
 
 from ..core.interfaces import VideoSink, IAuthManager
+from ..utils.connection_monitor import ConnectionMonitor
 
 # Configure structured logging
 logger = logging.getLogger("ring.live")
@@ -31,8 +32,19 @@ class LiveViewClient:
     KEEPALIVE_SEC = 9
     MAX_DURATION = 590  # battery cams die at 10 min, stop at 9 m 50 s
     WS_PARAMS = "api_version=4.0&auth_type=ring_solutions"  # Removed auth_type=ring_solutions
+    # Maximum number of connection retries before giving up
+    MAX_RETRIES = 3
+    # Initial backoff time in seconds
+    INITIAL_BACKOFF = 2
+    # Maximum backoff time in seconds
+    MAX_BACKOFF = 30
+    # How often to check if ticket renewal is needed (in seconds)
+    TICKET_CHECK_INTERVAL = 1800  # 30 minutes - tickets typically expire after 1 hour
+    # How often to check connection status (in seconds)
+    CONNECTION_CHECK_INTERVAL = 15
 
-    def __init__(self, auth_token: str, device_id: str, video_sink: VideoSink, auth_manager: IAuthManager = None):
+    def __init__(self, auth_token: str, device_id: str, video_sink: VideoSink, auth_manager: IAuthManager = None, 
+                 enable_wake_detection: bool = True):
         """
         Initialize the LiveViewClient.
         
@@ -41,6 +53,7 @@ class LiveViewClient:
             device_id: Ring device ID to stream from
             video_sink: Sink implementation for receiving video frames
             auth_manager: Optional authentication manager for advanced auth operations
+            enable_wake_detection: Whether to enable wake detection to reconnect after system sleep
         """
         self._token = auth_token
         self._dev = device_id
@@ -54,7 +67,91 @@ class LiveViewClient:
         self._session_id = str(uuid.uuid4())
         self._account_id = None
         self._seq = 1
+        self._connection_attempts = 0
+        self._connection_backoff = self.INITIAL_BACKOFF
+        self._ticket = None
+        self._region = None
+        self._ticket_updated_at = 0  # Start with immediate refresh
+        self._enable_wake_detection = enable_wake_detection
+        self._connection_monitor = None
         
+    async def _check_and_refresh_ticket(self) -> tuple:
+        """
+        Check if the signalsocket ticket needs to be refreshed and get a new one if needed.
+        
+        Returns:
+            A tuple of (ticket, region) - refreshed if necessary
+            
+        Raises:
+            ValueError: If unable to get a valid ticket after retries
+        """
+        # If it's been less than TICKET_CHECK_INTERVAL since last update, use current ticket
+        current_time = time.time()
+        time_since_refresh = current_time - self._ticket_updated_at
+        
+        # If we have a valid ticket that's not too old, use it
+        if self._ticket and time_since_refresh < self.TICKET_CHECK_INTERVAL:
+            logger.debug(f"Using existing ticket (age: {time_since_refresh:.1f}s)")
+            return self._ticket, self._region
+            
+        logger.info(f"Refreshing signalsocket ticket (age: {time_since_refresh:.1f}s)...")
+        
+        # Attempt to get a new ticket using our max retries
+        attempt = 0
+        last_error = None
+        
+        while attempt < self.MAX_RETRIES:
+            attempt += 1
+            try:
+                # Try to refresh auth token first if we have an auth manager
+                if self._auth_manager and attempt > 1:
+                    fresh_token = self._auth_manager.get_token()
+                    if fresh_token:
+                        self._token = fresh_token
+                        logger.info("Refreshed auth token for ticket request")
+                
+                # Get a fresh ticket using _get_ticket method
+                ticket, region, auth_error = await self._get_ticket()
+                
+                # Handle authentication error specially
+                if auth_error:
+                    if attempt < self.MAX_RETRIES:
+                        logger.warning(f"Authentication issue detected during ticket refresh (attempt {attempt}/{self.MAX_RETRIES}), retrying...")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise ValueError("Authentication failed after multiple attempts")
+                    
+                # If no ticket was returned
+                if not ticket:
+                    if attempt < self.MAX_RETRIES:
+                        logger.warning(f"Failed to get ticket (attempt {attempt}/{self.MAX_RETRIES}), retrying...")
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        raise ValueError("Failed to get signalsocket ticket after multiple attempts")
+                
+                # Update our stored ticket and timestamp
+                self._ticket = ticket
+                self._region = region
+                self._ticket_updated_at = current_time
+                logger.info(f"Signalsocket ticket refreshed successfully")
+                
+                return ticket, region
+                
+            except Exception as e:
+                last_error = e
+                logger.error(f"Error refreshing signalsocket ticket (attempt {attempt}/{self.MAX_RETRIES}): {e}")
+                await asyncio.sleep(1)
+        
+        # If we have an existing ticket despite refresh failure, use it as a last resort
+        if self._ticket:
+            logger.warning(f"Using existing ticket as last resort after {self.MAX_RETRIES} failed refresh attempts")
+            return self._ticket, self._region
+            
+        # We couldn't get a ticket after multiple attempts
+        raise ValueError(f"Failed to obtain a signalsocket ticket: {last_error}")
+            
     async def _get_account_id(self):
         """Get the Ring account ID using the authentication token or auth manager."""
         if self._account_id:
@@ -76,7 +173,13 @@ class LiveViewClient:
             
 
     async def _get_ticket(self):
-        """Request a signalsocket ticket from the Ring API."""
+        """
+        Request a signalsocket ticket from the Ring API.
+        
+        Returns:
+            Tuple of (ticket, region, auth_error) where auth_error is a boolean
+            indicating whether an authentication error occurred
+        """
         logger.info("Requesting signalsocket ticket...")
         try:
             async with aiohttp.ClientSession() as session:
@@ -86,21 +189,43 @@ class LiveViewClient:
                 )
                 if response.status != 200:
                     error_text = await response.text()
-                    raise ValueError(f"Failed to get ticket: {response.status} - {error_text}")
+                    error_msg = f"Failed to get ticket: {response.status} - {error_text}"
+                    
+                    # Handle authentication errors specially
+                    if response.status in (401, 403):
+                        logger.warning(f"Authentication error when requesting ticket: {error_msg}")
+                        # Check if auth manager is available to refresh token
+                        if self._auth_manager and self._connection_attempts < self.MAX_RETRIES:
+                            logger.info("Attempting to refresh authentication token...")
+                            fresh_token = self._auth_manager.get_token()
+                            if fresh_token and fresh_token != self._token:
+                                self._token = fresh_token
+                                logger.info("Authentication token refreshed, will retry ticket request")
+                                # Signal that auth error occurred without raising exception
+                                return None, None, True  # Third param indicates auth error
+                        
+                        # Return auth error if we couldn't refresh
+                        return None, None, True
+                        
+                    raise ValueError(error_msg)
                     
                 data = await response.json()
-                logger.info(f"Received ticket response: {data}")
+                logger.debug(f"Received ticket response: {data}")
                 
                 # Check if the response contains a ticket
                 if "ticket" not in data:
-                    logger.warning("Ticket response missing ticket field, using legacy approach")
-                    return self._token, None  # Return token as ticket for legacy approach
+                    logger.warning("Ticket response missing ticket field")
+                    raise ValueError("Ticket response missing required 'ticket' field")
                     
-                # Return the ticket and region (region might be None)
-                return data["ticket"], data.get("region")
+                # Return the ticket and region (region might be None) with auth_error=False
+                return data["ticket"], data.get("region"), False
         except Exception as e:
-            logger.warning(f"Error getting signalsocket ticket: {e}, falling back to legacy approach")
-            return self._token, None  # Return token as ticket for legacy approach
+            if "Authentication error" in str(e) or "401" in str(e) or "403" in str(e):
+                logger.warning(f"Authentication error: {e}")
+                return None, None, True
+            else:
+                logger.error(f"Error getting signalsocket ticket: {e}")
+                raise
 
     async def start(self):
         """
@@ -109,11 +234,30 @@ class LiveViewClient:
         2. Connect to WebSocket and send the offer
         3. Handle SDP answer and ICE candidates
         4. Start media pipeline
+        
+        Will retry on failures with exponential backoff.
         """
+        # Keep track of connection attempts
+        self._connection_attempts += 1
+        
         try:
             # Print a clear message showing we're starting
             print("\n📹 Starting Ring LiveView client...")
             print(f"🔑 Using device ID: {self._dev}")
+            print(f"🔄 Connection attempt {self._connection_attempts} of {self.MAX_RETRIES}")
+            
+            # Check token if auth manager provided (token still needed for getting tickets)
+            if self._auth_manager:
+                fresh_token = self._auth_manager.get_token()
+                if fresh_token:
+                    # Always update the token regardless of whether it seems changed
+                    # since the formatting or encoding might differ
+                    self._token = fresh_token
+                    logger.info("Using refreshed auth token")
+                    # Force ticket refresh on the next attempt
+                    self._ticket_updated_at = 0
+                else:
+                    logger.warning("Auth manager returned no token, using existing token")
             
             # Ensure we have the account ID
             try:
@@ -132,9 +276,9 @@ class LiveViewClient:
             print(f"🔄 Session ID: {self._session_id[:8]}...")
             print(f"🔄 Dialog ID: {self._dialog_id[:8]}...")
             
-            # Get auth ticket and determine WebSocket URL
-            ticket, region = await self._get_ticket()
-            ws_url = await self._build_ws_url(ticket, region)
+            # Get fresh auth ticket and determine WebSocket URL
+            self._ticket, self._region = await self._check_and_refresh_ticket()
+            ws_url = await self._build_ws_url(self._ticket, self._region)
             logger.info(f"Connecting to WebSocket URL: {ws_url[:60]}...")
             
             # Create RTCPeerConnection with ICE servers for better connectivity
@@ -166,14 +310,56 @@ class LiveViewClient:
             await self._wait_for_ice_gathering()
             
             # Connect to WebSocket and start signaling
-            self._ws = await connect(
-                ws_url,
-                ping_interval=None,
-                subprotocols=("aws.iot.webrtc.signalling.lightcone",),
-                user_agent_header="Mozilla/5.0 (RingPython)"
-            )
-            
-            print("🔌 WebSocket connection established")
+            try:
+                self._ws = await connect(
+                    ws_url,
+                    ping_interval=None,
+                    subprotocols=("aws.iot.webrtc.signalling.lightcone",),
+                    user_agent_header="Mozilla/5.0 (RingPython)"
+                )
+                print("🔌 WebSocket connection established")
+                # Reset connection attempts counter on success
+                self._connection_attempts = 0
+                self._connection_backoff = self.INITIAL_BACKOFF
+            except Exception as ws_error:
+                # Handle WebSocket connection errors specifically
+                logger.error(f"WebSocket connection error: {ws_error}")
+                
+                # Check for all types of auth-related errors
+                auth_error = any(code in str(ws_error) for code in ["401", "403", "404"])
+                
+                if auth_error and self._connection_attempts < self.MAX_RETRIES:
+                    if "401" in str(ws_error) or "403" in str(ws_error):
+                        logger.warning("HTTP 401/403 error detected. Authentication problem likely. Will try with refreshed token.")
+                        # Try to get a fresh auth token if auth manager is available
+                        if self._auth_manager:
+                            fresh_token = self._auth_manager.get_token()
+                            if fresh_token:
+                                self._token = fresh_token
+                                logger.info("Auth token refreshed due to 401/403 error")
+                    else:
+                        logger.warning("HTTP 404 error, likely ticket expired. Will retry with fresh ticket.")
+                        
+                    # Force ticket refresh regardless of timing
+                    self._ticket_updated_at = 0
+                    await self.stop()
+                    
+                    # Calculate backoff time
+                    backoff_time = min(self._connection_backoff, self.MAX_BACKOFF)
+                    logger.info(f"Retrying in {backoff_time} seconds...")
+                    print(f"🔄 Will retry with fresh credentials in {backoff_time} seconds...")
+                    
+                    await asyncio.sleep(backoff_time)
+                    # Increase backoff for next attempt
+                    self._connection_backoff *= 2
+                    
+                    # Try again recursively
+                    return await self.start()
+                elif self._connection_attempts >= self.MAX_RETRIES:
+                    logger.error(f"Maximum retry attempts ({self.MAX_RETRIES}) reached.")
+                
+                # Re-raise the exception to be handled by the outer try/except
+                raise ws_error
             
             # Set up ICE candidate handler for sending to Ring
             @self._pc.on("icecandidate")
@@ -198,37 +384,63 @@ class LiveViewClient:
             # Start message handler
             self._message_handler_task = asyncio.create_task(self._monitor_message_handler())
             
+            # Start network connection monitor to detect wake from sleep
+            if self._enable_wake_detection:
+                self._setup_wake_detection()
+            
+            # Add a ticket refresh task that periodically checks and refreshes the signalsocket ticket
+            self._ticket_refresh_task = asyncio.create_task(self._ticket_refresh_loop())
+            
             print("✅ Ring live view session started successfully")
             return True
             
         except Exception as e:
             logger.error(f"Error starting live view: {e}")
             print(f"❌ Error starting live view: {e}")
-            await self.stop()
-            return False
+            
+            # Check if we should retry
+            if self._connection_attempts < self.MAX_RETRIES and not self._stop.is_set():
+                # Calculate backoff time
+                backoff_time = min(self._connection_backoff, self.MAX_BACKOFF)
+                logger.info(f"Will retry in {backoff_time} seconds (attempt {self._connection_attempts} of {self.MAX_RETRIES})...")
+                print(f"🔄 Will retry in {backoff_time} seconds...")
+                
+                await self.stop()
+                await asyncio.sleep(backoff_time)
+                
+                # Increase backoff for next attempt
+                self._connection_backoff *= 2
+                
+                # Try again recursively
+                return await self.start()
+            else:
+                # We've exhausted our retries or were explicitly stopped
+                logger.error("Giving up after failed connection attempts")
+                await self.stop()
+                return False
 
     async def _build_ws_url(self, ticket, region):
         """Build the WebSocket URL based on ticket and region."""
-        if ticket != self._token:  # If we got a real ticket, use the new API
-            # Create a client ID
-            client_id = f"ring_site-{uuid.uuid4()}"
+        # We must have a ticket to proceed - there is no legacy fallback
+        if not ticket:
+            raise ValueError("No ticket available for WebSocket connection")
             
-            # Determine the host based on region
-            if region:
-                host = f"api.{region}.prod.signalling.ring.devices.a2z.com"
-            else:
-                host = "api.prod.signalling.ring.com"
-            
-            # Build the full WebSocket URL
-            ws_url = (
-                f"wss://{host}/ws?"
-                f"{self.WS_PARAMS}&client_id={client_id}&token={ticket}"
-            )
-            print(f"🌐 Using modern API endpoint")
+        # Create a client ID
+        client_id = f"ring_site-{uuid.uuid4()}"
+        
+        # Determine the host based on region
+        if region:
+            host = f"api.{region}.prod.signalling.ring.devices.a2z.com"
         else:
-            # Fall back to the legacy endpoint
-            ws_url = f"wss://api.ring.com/connection/v2?auth={ticket}"
-            print(f"🌐 Using legacy API endpoint")
+            host = "api.prod.signalling.ring.com"
+        
+        # Build the full WebSocket URL
+        ws_url = (
+            f"wss://{host}/ws?"
+            f"{self.WS_PARAMS}&client_id={client_id}&token={ticket}"
+        )
+        print(f"🌐 Using Ring API endpoint with ticket-based authentication")
+        logger.info(f"Using signalsocket ticket endpoint with region: {region or 'default'}")
         
         return ws_url
 
@@ -429,12 +641,33 @@ class LiveViewClient:
     async def _keepalive_webrtc_session(self, session_jwt):
         """Send periodic keepalive messages for the WebRTC session."""
         # The Ring session needs a ping every 5 seconds to keep the connection alive
-        # as per the TypeScript implementation
         PING_INTERVAL = 5  # seconds
+        ACTIVITY_INTERVAL = 15  # If no activity for 15 seconds, send a refresh
+        consecutive_errors = 0
+        max_errors = 3  # Maximum consecutive errors before triggering reconnection
+        last_activity_time = time.time()
         
         while not self._stop.is_set():
             try:
+                current_time = time.time()
                 logger.debug("Sending ping keepalive")
+                
+                # Check if we need to send a "refresh" message due to inactivity
+                if current_time - last_activity_time > ACTIVITY_INTERVAL:
+                    logger.debug("Sending refresh due to inactivity")
+                    try:
+                        # Send a refresh message to prevent unanswered_timeout
+                        await self._ws.send(json.dumps({
+                            "method": "refresh",
+                            "dialog_id": self._dialog_id,
+                            "body": {
+                                "doorbot_id": int(self._dev),
+                                "session_id": session_jwt
+                            }
+                        }))
+                        last_activity_time = current_time
+                    except Exception as e:
+                        logger.warning(f"Failed to send refresh message: {e}")
                 
                 # Send the ping message in the format from the TypeScript library
                 await self._ws.send(json.dumps({
@@ -445,6 +678,9 @@ class LiveViewClient:
                         "session_id": session_jwt
                     }
                 }))
+                
+                # Reset error counter on successful ping
+                consecutive_errors = 0
                 
                 # Wait for next ping interval with short timeouts to be responsive to cancellation
                 remaining = PING_INTERVAL
@@ -461,11 +697,50 @@ class LiveViewClient:
                     # Don't log errors if we're already stopping
                     break
                     
-                logger.error(f"Keepalive error: {e}")
-                if "Connection" in str(e) or "closed" in str(e).lower():
-                    logger.warning("Connection issue in keepalive, stopping client")
+                consecutive_errors += 1
+                logger.error(f"Keepalive error: {e} (attempt {consecutive_errors} of {max_errors})")
+                
+                if consecutive_errors >= max_errors:
+                    logger.warning(f"Too many consecutive errors ({consecutive_errors}), triggering reconnection")
+                    # Only stop the client and don't reconnect if we hit max_errors
+                    # The outer loop in capture_engine will handle the reconnection
                     await self.stop()
                     break
+                
+                # For fewer consecutive errors, wait a bit and continue
+                await asyncio.sleep(1)
+
+    async def _ticket_refresh_loop(self):
+        """Periodically check and refresh the signalsocket ticket."""
+        backoff_time = 5  # Start with 5 seconds backoff
+        
+        while not self._stop.is_set():
+            try:
+                # Check if ticket needs refreshing (this will refresh if needed)
+                await self._check_and_refresh_ticket()
+                
+                # Reset backoff on success
+                backoff_time = 5
+                
+                # Wait for next check interval with short timeouts to be responsive to cancellation
+                remaining = self.TICKET_CHECK_INTERVAL
+                while remaining > 0 and not self._stop.is_set():
+                    sleep_time = min(1.0, remaining)  # Sleep at most 1 second at a time
+                    await asyncio.sleep(sleep_time)
+                    remaining -= sleep_time
+                    
+            except asyncio.CancelledError:
+                logger.debug("Ticket refresh loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in ticket refresh loop: {e}")
+                
+                # Use exponential backoff for errors
+                logger.info(f"Will retry ticket refresh in {backoff_time} seconds")
+                await asyncio.sleep(backoff_time)
+                
+                # Increase backoff time for next attempt (with a max)
+                backoff_time = min(backoff_time * 2, self.MAX_BACKOFF)
 
     async def stop(self):
         """Stop the client and clean up resources."""
@@ -476,7 +751,8 @@ class LiveViewClient:
         logger.info("Stopping LiveViewClient")
         
         # Cancel all running tasks first
-        for task_name in ('_keepalive_task', '_timeout_task', '_monitor_task', '_track_task', '_message_handler_task'):
+        for task_name in ('_keepalive_task', '_timeout_task', '_monitor_task', '_track_task', 
+                         '_message_handler_task', '_ticket_refresh_task'):
             if hasattr(self, task_name) and getattr(self, task_name):
                 task = getattr(self, task_name)
                 if not task.done():
@@ -517,6 +793,15 @@ class LiveViewClient:
             await self._sink.close()
         except Exception as e:
             logger.warning(f"Error closing video sink: {e}")
+            
+        # Stop connection monitor if active
+        if self._connection_monitor:
+            try:
+                await self._connection_monitor.stop()
+                self._connection_monitor = None
+                logger.debug("Connection monitor stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping connection monitor: {e}")
         
         logger.info("LiveViewClient stopped")
 
@@ -569,6 +854,12 @@ class LiveViewClient:
                     if "Connection" in str(e) or any(x in str(e).lower() for x in ["closed", "shutdown", "reset"]):
                         # Connection errors should trigger a stop
                         logger.warning("Connection error in track handling, stopping client")
+                        
+                        # If this is a connection reset error, force ticket refresh on next attempt
+                        if "reset by peer" in str(e).lower():
+                            logger.warning("Connection reset by peer detected - forcing ticket refresh on next attempt")
+                            self._ticket_updated_at = 0  # Force ticket refresh
+                            
                         await self.stop()
                         break
                     
@@ -645,6 +936,9 @@ class LiveViewClient:
 
     async def _monitor_message_handler(self):
         """Monitor WebSocket messages for errors and notifications."""
+        consecutive_errors = 0
+        max_errors = 3  # Maximum consecutive errors before triggering reconnection
+        
         try:
             while not self._stop.is_set() and self._ws:
                 try:
@@ -652,6 +946,9 @@ class LiveViewClient:
                     message_task = asyncio.create_task(self._ws.recv())
                     try:
                         packet = await asyncio.wait_for(message_task, timeout=2.0)
+                        
+                        # Reset error counter on successful message
+                        consecutive_errors = 0
                         
                         # Parse the message
                         try:
@@ -701,12 +998,28 @@ class LiveViewClient:
                     if self._stop.is_set():
                         # Don't log errors if we're stopping
                         break
-                        
+                    
+                    consecutive_errors += 1
+                    
+                    # Check if it's a known connection error
+                    is_connection_error = "Connection" in str(e) or any(
+                        x in str(e).lower() for x in ["closed", "shutdown", "reset", "404", "connection reset"]
+                    )
+                    
                     # Log connection errors but not too verbosely
-                    if "Connection" in str(e) or "closed" in str(e).lower():
-                        logger.warning("WebSocket connection error, stopping client")
-                        await self.stop()
-                        break
+                    if is_connection_error:
+                        logger.warning(f"WebSocket connection error: {e} (attempt {consecutive_errors} of {max_errors})")
+                        
+                        # If we detect a connection reset or 404 error, it might be related to an expired ticket
+                        if "reset by peer" in str(e).lower() or "404" in str(e):
+                            logger.warning("Connection reset or 404 detected - likely expired ticket. Forcing refresh.")
+                            # Force ticket refresh immediately
+                            self._ticket_updated_at = 0
+                            
+                        if consecutive_errors >= max_errors:
+                            logger.error("Too many consecutive WebSocket errors, stopping client")
+                            await self.stop()
+                            break
                     else:
                         # For other errors, log once but not repeatedly
                         logger.warning(f"WebSocket message error: {e}")
@@ -721,22 +1034,41 @@ class LiveViewClient:
                 logger.error(f"Unhandled error in message monitor: {e}")
                 await self.stop()
 
-    # Replaced by _keepalive_webrtc_session
-
-    async def _timeout_guard(self):
-        """Automatically stop after MAX_DURATION to prevent battery drain."""
+    def _setup_wake_detection(self):
+        """Set up wake detection to reconnect after system sleep."""
+        if self._connection_monitor is None:
+            # Create the connection monitor
+            self._connection_monitor = ConnectionMonitor(
+                check_interval=self.CONNECTION_CHECK_INTERVAL
+            )
+            
+            # Register wake callback
+            self._connection_monitor.on_wake(self._handle_wake_event)
+            
+            # Start the connection monitor
+            asyncio.create_task(self._connection_monitor.start())
+            logger.info("Wake detection enabled - will reconnect after system sleep")
+    
+    async def _handle_wake_event(self):
+        """Handle wake event by forcing a reconnection."""
+        logger.info("System wake detected - reconnecting Ring livestream")
+        
+        # Force ticket refresh
+        self._ticket_updated_at = 0
+        
+        # Try to stop gracefully, then restart
         try:
-            # Use shorter sleep intervals to be more responsive to cancellation
-            remaining = self.MAX_DURATION
-            while remaining > 0 and not self._stop.is_set():
-                sleep_chunk = min(10, remaining)  # Sleep at most 10 seconds at a time
-                await asyncio.sleep(sleep_chunk)
-                remaining -= sleep_chunk
-                
-            if not self._stop.is_set():
-                logger.warning(f"Max live-view duration ({self.MAX_DURATION}s) reached; stopping.")
-                await self.stop()
-        except asyncio.CancelledError:
-            logger.debug("Timeout guard task cancelled")
+            await self.stop()
+            
+            # Wait a moment for network to stabilize
+            await asyncio.sleep(2)
+            
+            # Reset connection counters to avoid hitting limits
+            self._connection_attempts = 0
+            self._connection_backoff = self.INITIAL_BACKOFF
+            
+            # Attempt to restart
+            logger.info("Attempting to restart livestream after wake")
+            restart_task = asyncio.create_task(self.start())
         except Exception as e:
-            logger.error(f"Error in timeout guard: {e}")
+            logger.error(f"Error handling wake event: {e}")

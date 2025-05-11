@@ -366,18 +366,20 @@ class CaptureEngine:
             
             # Create recorder sink with callback and live view client
             sink = RecorderSink(video_path, callback=recording_completed)
-            client = LiveViewClient(token, device_id, sink)
+            
+            # Pass auth_manager to LiveViewClient for token refreshing
+            client = LiveViewClient(token, device_id, sink, auth_manager=self._auth_manager)
             
             # Modify max duration if requested
             if duration_sec is not None and isinstance(duration_sec, int):
                 client.MAX_DURATION = min(590, duration_sec)  # Cap at 590 seconds
             
-            # Start the client
+            # Start the client with retry logic handled inside LiveViewClient
             logger.info(f"Starting live view capture for device {device_id} with duration {duration_sec}s")
-            try:
-                await client.start()
-            except Exception as e:
-                logger.error(f"Error starting live view client: {e}")
+            success = await client.start()
+            
+            if not success:
+                logger.error("LiveViewClient failed to start after all retry attempts")
                 return None
             
             # Just return the path - we'll rely on the callback to handle the video

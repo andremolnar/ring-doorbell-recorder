@@ -115,6 +115,43 @@ Arguments:
 
 The captured video will be saved as an MP4 file with a timestamp filename in the specified output directory.
 
+### Sleep Prevention Options
+
+The application includes features to prevent system sleep while running to maintain network connectivity for continuous monitoring. You can control this behavior with command-line arguments:
+
+```bash
+# Run with default settings (prevent system sleep but allow display sleep)
+python src/run.py
+
+# Run with display sleep prevented (keeps screen on)
+python src/run.py --sleep-mode all
+
+# Run with only disk sleep prevented
+python src/run.py --sleep-mode disk
+
+# Run with sleep prevention completely disabled
+python src/run.py --no-sleep-prevention
+# or
+python src/run.py --sleep-mode none
+```
+
+Sleep mode options:
+
+- `--sleep-mode all`: Prevents all sleep (system, display, and disk)
+- `--sleep-mode system`: Default - Prevents system sleep but allows display sleep (saves power)
+- `--sleep-mode disk`: Prevents only disk sleep
+- `--sleep-mode none`: Disables sleep prevention entirely
+- `--no-sleep-prevention`: Disables sleep prevention entirely
+
+#### How Sleep Prevention Works
+
+The application uses platform-specific methods to prevent system sleep:
+
+- On **macOS**: Uses the `caffeinate` utility with appropriate flags
+- On **Linux**: Uses `systemd-inhibit` or falls back to `xdg-screensaver suspend`
+
+Network connectivity is monitored to detect wake from sleep events, which allows the application to automatically reconnect when the system wakes up.
+
 ### Manual Event Testing
 
 The repository includes standalone test scripts to simulate Ring events and verify the recording functionality:
@@ -191,6 +228,9 @@ The application can be configured using environment variables:
 | `DATABASE_PATH`   | Path to SQLite database  | `./ringdoorbell.db`   |
 | `STORAGE_PATH`    | Path for file storage    | `./captured_media`    |
 | `LOGGING_LEVEL`   | Logging level            | `INFO`                |
+| `PREVENT_SLEEP`   | Enable sleep prevention  | `true`                |
+
+For more detailed configuration options, particularly regarding sleep prevention, see [Sleep Prevention Documentation](docs/sleep_prevention.md).
 
 ## Architecture
 
@@ -252,6 +292,7 @@ Detailed documentation for specific components is available:
 
 - [LiveView Client Documentation](docs/live_view_client.md): Explains the WebRTC-based live view functionality
 - [Troubleshooting 4002 Errors](docs/troubleshooting_4002_error.md): Solutions for common WebRTC connection errors
+- [Sleep Prevention Documentation](docs/sleep_prevention.md): Explains the sleep prevention and wake detection features
 
 ## Troubleshooting
 

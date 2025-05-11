@@ -41,8 +41,9 @@ async def main():
                       help="Directory to save the captured video (default: captured_media)")
     args = parser.parse_args()
     
-    # Initialize auth manager
-    token_path = os.path.join(os.path.dirname(__file__), "ring_token.cache")
+    # Initialize auth manager - use project root for token
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    token_path = os.path.join(project_root, "ring_token.cache")
     auth_manager = RingAuthManager(
         user_agent="RingDoorbell/LiveView",
         token_path=token_path
