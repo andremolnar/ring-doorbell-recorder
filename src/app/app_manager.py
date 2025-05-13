@@ -71,7 +71,7 @@ class AppManager:
         try:
             await self._auth_manager.authenticate()
         except Exception as e:
-            logger.error("Authentication failed", error=str(e))
+            logger.error(f"Authentication failed: {e}")
             raise
         
         # Get the authenticated API instance
@@ -80,9 +80,9 @@ class AppManager:
         # Try to get and log the account ID
         try:
             account_id = await self._auth_manager.get_account_id()
-            logger.info("Retrieved Ring account ID", account_id=account_id)
+            logger.info(f"Retrieved Ring account ID: {account_id}")
         except Exception as e:
-            logger.warning("Failed to retrieve account ID", error=str(e))
+            logger.warning(f"Failed to retrieve account ID: {e}")
             # Continue with initialization even if getting account ID fails
         
         # Get devices
@@ -98,7 +98,7 @@ class AppManager:
             }
             self._log_devices()
         except Exception as e:
-            logger.error("Failed to get devices", error=str(e))
+            logger.error(f"Failed to get devices: {e}")
             raise
         
         # Wire up the event listener to the capture engine
@@ -124,9 +124,7 @@ class AppManager:
         event_id = getattr(event, 'id', 'unknown')
         device_name = getattr(event, 'device_name', 'unknown')
         
-        logger.info("Received doorbell ding event", 
-                  event_id=event_id,
-                  device_name=device_name)
+        logger.info(f"Received doorbell ding event - event_id: {event_id}, device: {device_name}")
             
         # Process and store the ding event
         # In the future, you can add ding-specific processing here
@@ -142,9 +140,7 @@ class AppManager:
         event_id = getattr(event, 'id', 'unknown')
         device_name = getattr(event, 'device_name', 'unknown')
         
-        logger.info("Received motion detection event", 
-                  event_id=event_id,
-                  device_name=device_name)
+        logger.info(f"Received motion detection event - event_id: {event_id}, device: {device_name}")
             
         # Process and store the motion event
         # In the future, you can add motion-specific processing here
@@ -160,9 +156,7 @@ class AppManager:
         event_id = getattr(event, 'id', 'unknown')
         device_name = getattr(event, 'device_name', 'unknown')
         
-        logger.info("Received on-demand (live view) event", 
-                  event_id=event_id,
-                  device_name=device_name)
+        logger.info(f"Received on-demand (live view) event - event_id: {event_id}, device: {device_name}")
             
         # Process and store the on-demand event
         # In the future, you can add on-demand-specific processing here
@@ -179,9 +173,7 @@ class AppManager:
         event_id = getattr(event, 'id', 'unknown')
         device_name = getattr(event, 'device_name', 'unknown')
         
-        logger.info(f"Received other event type: {event_type}", 
-                  event_id=event_id,
-                  device_name=device_name)
+        logger.info(f"Received other event type: {event_type} - event_id: {event_id}, device: {device_name}")
             
         # Process and store the event
         await self._capture_engine.capture(event)
@@ -195,9 +187,7 @@ class AppManager:
         """
         # Log the event
         if hasattr(event, 'kind'):
-            logger.info(f"Received event of type: {event.kind}", 
-                      event_id=getattr(event, 'id', 'unknown'),
-                      device_name=getattr(event, 'device_name', 'unknown'))
+            logger.info(f"Received event of type: {event.kind} - event_id: {getattr(event, 'id', 'unknown')}, device: {getattr(event, 'device_name', 'unknown')}")
         else:
             logger.info(f"Received unknown event type")
             
@@ -239,7 +229,7 @@ class AppManager:
             
             logger.info("Ring Doorbell application started successfully")
         except Exception as e:
-            logger.error("Failed to start application", error=str(e))
+            logger.error(f"Failed to start application: {e}")
             raise
     
     async def stop(self) -> None:
@@ -259,7 +249,7 @@ class AppManager:
         except asyncio.TimeoutError:
             logger.error("Timeout while stopping event listener - forcing shutdown")
         except Exception as e:
-            logger.error("Error stopping event listener", error=str(e))
+            logger.error(f"Error stopping event listener: {e}")
         
         # Clear any references that might prevent cleanup
         self._devices.clear()
@@ -284,26 +274,17 @@ class AppManager:
         # Log doorbell devices
         if self._devices.get("doorbots"):
             for doorbell in self._devices["doorbots"]:
-                logger.info("Found Ring doorbell",
-                          device_id=doorbell.id,
-                          device_name=doorbell.name,
-                          device_type="doorbell")
+                logger.info(f"Found Ring doorbell - id: {doorbell.id}, name: {doorbell.name}, type: doorbell")
         
         # Log camera devices
         if self._devices.get("stickup_cams"):
             for camera in self._devices["stickup_cams"]:
-                logger.info("Found Ring camera",
-                          device_id=camera.id,
-                          device_name=camera.name,
-                          device_type="camera")
+                logger.info(f"Found Ring camera - id: {camera.id}, name: {camera.name}, type: camera")
         
         # Log chime devices
         if self._devices.get("chimes"):
             for chime in self._devices["chimes"]:
-                logger.info("Found Ring chime",
-                         device_id=chime.id,
-                         device_name=chime.name,
-                         device_type="chime")
+                logger.info(f"Found Ring chime - id: {chime.id}, name: {chime.name}, type: chime")
     
     def set_sleep_mode(self, mode: SleepMode) -> bool:
         """

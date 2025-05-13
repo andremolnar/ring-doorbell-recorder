@@ -411,7 +411,7 @@ class LiveViewClient:
                     
                     # Calculate backoff time
                     backoff_time = min(self._connection_backoff, self.MAX_BACKOFF)
-                    logger.info("Retrying with fresh credentials", backoff_seconds=backoff_time)
+                    logger.info(f"Retrying with fresh credentials (backoff: {backoff_time}s)")
                     
                     await asyncio.sleep(backoff_time)
                     # Increase backoff for next attempt
@@ -973,7 +973,7 @@ class LiveViewClient:
                                         if fresh_token:
                                             self._token = fresh_token
                                 except Exception as refresh_error:
-                                    logger.warning("Auth token refresh failed", error=str(refresh_error))
+                                    logger.warning(f"Auth token refresh failed: {refresh_error}")
                             
                             self._ticket_updated_at = 0  # Force ticket refresh
                             
@@ -1023,7 +1023,7 @@ class LiveViewClient:
                     
                 # Log state changes
                 if state != prev_state:
-                    logger.info("ICE connection state changed", state=state)
+                    logger.info(f"ICE connection state changed to: {state}")
                     prev_state = state
                     
                     # Handle specific states
@@ -1172,7 +1172,7 @@ class LiveViewClient:
                                         if fresh_token:
                                             self._token = fresh_token
                                 except Exception as refresh_error:
-                                    logger.warning("Auth token refresh failed", error=str(refresh_error))
+                                    logger.warning(f"Auth token refresh failed: {refresh_error}")
                             
                             # Force ticket refresh immediately
                             self._ticket_updated_at = 0

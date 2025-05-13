@@ -83,8 +83,7 @@ class CaptureEngine:
                 device_id = str(device_info.get("id")) if device_info.get("id") else None
                 event_id = event.get("id", "unknown-id")
             
-            logger.info(f"Received event of type: {event_type}", 
-                       extra={"device_name": device_name, "event_id": event_id})
+            logger.info(f"Received event of type: {event_type} - device: {device_name}, event_id: {event_id}")
             
             # Map common fields
             processed_event = self._process_event(event)
@@ -101,20 +100,13 @@ class CaptureEngine:
                         elif result is False:  # Already exists or other issue
                             already_exists_count += 1
                     except Exception as e:
-                        logger.error(f"Failed to save event to storage: {e}", 
-                                  extra={"event_id": processed_event.id, "storage": storage.__class__.__name__})
+                        logger.error(f"Failed to save event to storage: {e} - event_id: {processed_event.id}, storage: {storage.__class__.__name__}")
                 
                 processing_time = round((time.time() - start_time) * 1000)
                 
                 # Log appropriately based on what happened
                 if success_count > 0:
-                    logger.info(f"Event processed and stored successfully",
-                              extra={
-                                  "event_id": processed_event.id,
-                                  "event_type": event_type,
-                                  "processing_time_ms": processing_time,
-                                  "storage_success_count": success_count
-                              })
+                    logger.info(f"Event processed and stored successfully - event_id: {processed_event.id}, type: {event_type}, time: {processing_time}ms, storage_count: {success_count}")
                     
                     # Emit event to trigger appropriate handlers for video recording
                     if device_id:
@@ -126,22 +118,14 @@ class CaptureEngine:
                         self._event_bus.emit(event_type, event_data)
                         
                 elif already_exists_count > 0:
-                    logger.info(f"Event already exists in storage",
-                              extra={
-                                  "event_id": processed_event.id,
-                                  "event_type": event_type,
-                                  "processing_time_ms": processing_time
-                              })
+                    logger.info(f"Event already exists in storage - event_id: {processed_event.id}, type: {event_type}, time: {processing_time}ms")
             else:
-                logger.warning(f"Event processing returned None, no data saved",
-                             extra={"event_type": event_type, "device_name": device_name})
+                logger.warning(f"Event processing returned None, no data saved - event_type: {event_type}, device: {device_name}")
         except Exception as e:
             import traceback
             trace = traceback.format_exc()
-            logger.error(f"Event processing failed: {e}",
-                       extra={"event_type": event_type if 'event_type' in locals() else "unknown",
-                             "error_details": str(e),
-                             "traceback": trace})
+            logger.error(f"Event processing failed: {e} - event_type: {event_type if 'event_type' in locals() else 'unknown'}")
+            logger.debug(f"Error details: {trace}")
     
     async def _handle_ding_event(self, event_data: Dict[str, Any]) -> None:
         """
