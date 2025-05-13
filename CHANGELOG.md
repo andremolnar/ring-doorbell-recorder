@@ -5,7 +5,39 @@ All notable changes to the Ring Doorbell project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2025-05-12
+
+### Added
+
+- Enhanced docstrings throughout the LiveViewClient class:
+  - Improved documentation for all major methods with detailed parameter and return type information
+  - Added clear documentation of error handling strategies and recovery mechanisms
+  - Documented WebRTC connection lifecycle with detailed state transition explanations
+
+### Changed
+
+- Replaced structured logging with standard Python logging format:
+  - Eliminated runtime errors caused by incompatible logging parameters
+  - Standardized log message format across all modules
+  - Improved readability of log messages with consistent formatting
+- Simplified overly defensive programming practices:
+  - Replaced generic `hasattr` checks with more specific `isinstance` checks where appropriate
+  - Added proper type imports to support correct type checking
+  - Maintained necessary safeguards while removing redundant checks
+- Improved ICE gathering and WebRTC connection monitoring:
+  - Enhanced recovery strategies for failed connections
+  - Improved documentation of connection state handling
+
+### Fixed
+
+- Fixed runtime errors related to structured logging parameters:
+  - Converted all keyword arguments in log calls to f-string format
+  - Fixed TypeError issues when passing custom fields to logger methods
+  - Ensured consistent logging approach across auth_manager.py and live_view_client.py
+- Fixed emoji usage in logs to maintain consistent formatting
+- Added clearer diagnostic information in timeout handling
+
+## [0.3.0] - 2025-05-11
 
 ### Added
 
